@@ -35,19 +35,32 @@ const extractPrompt = ai.definePrompt({
   name: 'extractPrompt',
   input: { schema: ExtractQuizInputSchema.extend({ content: z.string() }) },
   output: { schema: ExtractQuizOutputSchema },
-  prompt: `You are an expert web content parser. I will provide you with the text content (HTML or plain text) from a website that contains a quiz.
-  
-  Your task is to identify all quiz questions and their respective multiple-choice options.
-  
-  Rules:
-  1. Generate a unique ID for each question.
-  2. Identify if the question is 'radio' (single choice) or 'checkbox' (multiple choice).
-  3. Extract all available options for each question.
-  4. Ignore any non-quiz content (ads, navbars, footers).
-  
-  Website Content:
-  {{{content}}}
-  `,
+  prompt: `You are an expert quiz parser. Your job is to extract all quiz questions and their answer options from the provided content.
+
+The content may already be pre-structured in this format (from SkillsBridge LMS):
+  Question 1: [question text]
+    A. [option]
+    B. [option]
+    C. [option]
+    D. [option]
+
+  Question 2: ...
+
+Or it may be raw HTML/text from a generic quiz website.
+
+Rules:
+1. Extract EVERY question you find. Do not skip any.
+2. For each question, generate a unique short ID (e.g., "q1", "q2"...).
+3. Determine the type:
+   - 'radio' if only ONE answer is correct (single choice, multiple choice single, true/false)
+   - 'checkbox' if MULTIPLE answers can be correct
+4. The 'options' array must contain just the answer text (NOT the A/B/C labels).
+5. Ignore navigation elements, headers, timers, progress bars, and non-question content.
+6. If content is pre-structured with "Question N:" format, parse it directly.
+
+Content to parse:
+{{{content}}}
+`,
 });
 
 const extractQuizFlow = ai.defineFlow(
