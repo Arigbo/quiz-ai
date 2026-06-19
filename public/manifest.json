@@ -2,10 +2,10 @@
   "manifest_version": 3,
   "name": "QuizSolver AI PRO",
   "version": "2.0.0",
-  "description": "Expert Quiz Assistant with AI-powered answer overlays.",
+  "description": "AI-powered quiz assistant that lives in your browser side panel.",
   "permissions": ["sidePanel"],
   "action": {
-    "default_title": "Open QuizSolver Side Panel"
+    "default_title": "Open QuizSolver"
   },
   "side_panel": {
     "default_path": "sidepanel.html"

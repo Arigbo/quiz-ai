@@ -1,18 +1,18 @@
-
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { PluginSidebar } from '@/components/plugin-sidebar';
 import { QuizItem } from '@/components/quiz-item';
 import { mockQuiz, QuizQuestion } from '@/app/lib/quiz-data';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Globe, ChevronLeft, ChevronRight, Lock, Shield, Layers } from 'lucide-react';
+import { Globe, ChevronLeft, ChevronRight, Lock, Shield, Layers, Loader2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { useSearchParams } from 'next/navigation';
+import { cn } from '@/lib/utils';
 
-export default function Home() {
+function QuizContent() {
   const searchParams = useSearchParams();
   const [isExtensionMode, setIsExtensionMode] = useState(false);
   const [isEnabled, setIsEnabled] = useState(false);
@@ -137,7 +137,7 @@ export default function Home() {
           </ScrollArea>
         </div>
 
-        {/* Plugin UI Overlay Component - Hidden or transformed in extension mode */}
+        {/* Plugin UI Overlay Component */}
         <PluginSidebar 
           isEnabled={isEnabled} 
           onToggle={setIsEnabled} 
@@ -148,7 +148,7 @@ export default function Home() {
         />
       </main>
 
-      {/* Floating Status Bar - Hide in extension mode to save space */}
+      {/* Floating Status Bar - Hide in extension mode */}
       {!isExtensionMode && (
         <footer className="h-10 border-t bg-white px-6 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-muted-foreground shrink-0 z-20">
           <div className="flex items-center gap-4">
@@ -168,6 +168,15 @@ export default function Home() {
   );
 }
 
-function cn(...inputs: any[]) {
-  return inputs.filter(Boolean).join(' ');
+export default function Home() {
+  return (
+    <Suspense fallback={
+      <div className="h-screen flex flex-col items-center justify-center bg-background gap-4">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm font-medium text-muted-foreground animate-pulse">Initializing Solver...</p>
+      </div>
+    }>
+      <QuizContent />
+    </Suspense>
+  );
 }
