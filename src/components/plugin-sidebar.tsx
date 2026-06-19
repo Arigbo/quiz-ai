@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
-import { extractQuiz } from '@/ai/flows/extract-quiz-flow';
+import { extractQuizClient as extractQuiz } from '@/lib/ai-client';
 import { useToast } from '@/hooks/use-toast';
 import { QuizQuestion } from '@/app/lib/quiz-data';
 

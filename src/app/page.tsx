@@ -11,7 +11,7 @@ import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { useSearchParams } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { extractQuiz } from '@/ai/flows/extract-quiz-flow';
+import { extractQuizClient as extractQuiz } from '@/lib/ai-client';
 import { useToast } from '@/hooks/use-toast';
 
 function QuizContent() {

@@ -9,20 +9,20 @@ import { Badge } from '@/components/ui/badge';
 import { CheckCircle2, Loader2, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { QuizQuestion } from '@/app/lib/quiz-data';
-import { autoAnswerQuizQuestion, AutoAnswerQuizQuestionOutput } from '@/ai/flows/auto-answer-quiz-question';
+import { autoAnswerClient, AutoAnswerOutput } from '@/lib/ai-client';
 import { useToast } from '@/hooks/use-toast';
 
 interface QuizItemProps {
   data: QuizQuestion;
   isActive: boolean;
   autoSolve: boolean;
-  onSolve: (result: AutoAnswerQuizQuestionOutput) => void;
+  onSolve: (result: AutoAnswerOutput) => void;
   index: number;
 }
 
 export function QuizItem({ data, isActive, autoSolve, onSolve, index }: QuizItemProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [answer, setAnswer] = useState<AutoAnswerQuizQuestionOutput | null>(null);
+  const [answer, setAnswer] = useState<AutoAnswerOutput | null>(null);
   const [selectedValue, setSelectedValue] = useState<string | null>(null);
   const { toast } = useToast();
 
@@ -41,7 +41,7 @@ export function QuizItem({ data, isActive, autoSolve, onSolve, index }: QuizItem
   const handleSolve = async () => {
     setIsAnalyzing(true);
     try {
-      const result = await autoAnswerQuizQuestion({
+      const result = await autoAnswerClient({
         question: data.question,
         options: data.options
       });
