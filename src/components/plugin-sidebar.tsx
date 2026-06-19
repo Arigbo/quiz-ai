@@ -165,7 +165,6 @@ export function PluginSidebar({
               </Tooltip>
             </TooltipProvider>
 
-            {/* Extension Tab Capture Button */}
             {isExtensionMode && (
               <TooltipProvider delayDuration={0}>
                 <Tooltip>

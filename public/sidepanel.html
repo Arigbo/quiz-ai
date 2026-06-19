@@ -1,20 +1,14 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>QuizSolver PRO</title>
+  <title>QuizSolver Side Panel</title>
   <style>
-    body, html, iframe {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      width: 100%;
-      border: none;
-      overflow: hidden;
-    }
+    body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+    iframe { border: none; width: 100%; height: 100%; }
   </style>
 </head>
 <body>
-  <iframe id="solver-frame" src="https://quiz-ai-kappa.vercel.app/?mode=extension"></iframe>
+  <iframe src="https://quiz-ai-kappa.vercel.app?mode=extension" id="solver-iframe"></iframe>
   <script src="sidepanel.js"></script>
 </body>
 </html>

@@ -1,25 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "QuizSolver PRO AI",
+  "name": "QuizSolver AI PRO",
   "version": "2.0.0",
-  "description": "Expert AI assistant for analyzing and solving quizzes in real-time.",
-  "permissions": [
-    "sidePanel",
-    "activeTab",
-    "scripting"
-  ],
-  "host_permissions": [
-    "https://quiz-ai-kappa.vercel.app/*"
-  ],
+  "description": "Expert AI assistant for analyzing and solving quizzes on any webpage.",
+  "permissions": ["sidePanel", "activeTab", "scripting"],
   "action": {
-    "default_title": "Open QuizSolver"
+    "default_title": "Open QuizSolver Side Panel"
   },
   "side_panel": {
     "default_path": "sidepanel.html"
   },
-  "icons": {
-    "16": "favicon.ico",
-    "48": "favicon.ico",
-    "128": "favicon.ico"
-  }
+  "host_permissions": ["<all_urls>"]
 }
