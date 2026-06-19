@@ -1,3 +1,4 @@
+
 "use client";
 
 import React, { useState } from 'react';
@@ -45,9 +46,10 @@ interface PluginSidebarProps {
   onRefresh: () => void;
   scanCount: number;
   onQuestionsFound: (questions: QuizQuestion[]) => void;
+  isExtensionMode?: boolean;
 }
 
-export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQuestionsFound }: PluginSidebarProps) {
+export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQuestionsFound, isExtensionMode }: PluginSidebarProps) {
   const [manualText, setManualText] = useState("");
   const [url, setUrl] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -62,7 +64,7 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQue
       onQuestionsFound(result.questions);
       toast({
         title: "Extraction Successful",
-        description: `Identified ${result.questions.length} questions from text.`,
+        description: `Identified ${result.questions.length} questions.`,
       });
       setIsDialogOpen(false);
       setManualText("");
@@ -85,7 +87,7 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQue
       onQuestionsFound(result.questions);
       toast({
         title: "Cloud Scan Successful",
-        description: `Imported ${result.questions.length} questions from ${new URL(url).hostname}.`,
+        description: `Imported ${result.questions.length} questions.`,
       });
       setIsUrlDialogOpen(false);
       setUrl("");
@@ -93,32 +95,46 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQue
       toast({
         variant: "destructive",
         title: "Scan Failed",
-        description: "The site might be blocking our scanner. Try 'Manual Extraction' by pasting the site's text.",
+        description: "Bot protection detected. Use Manual Extraction.",
       });
     } finally {
       setIsScanning(false);
     }
   };
 
-  return (
-    <aside className="fixed right-6 top-1/2 -translate-y-1/2 w-16 hover:w-64 transition-all duration-300 bg-white shadow-2xl rounded-2xl border border-primary/10 overflow-hidden z-50 group">
-      <div className="h-full flex flex-col">
-        {/* Header/Logo */}
-        <div className="p-4 flex items-center gap-3">
-          <div className="bg-primary p-2 rounded-lg shrink-0">
-            <BrainCircuit className="h-6 w-6 text-white" />
-          </div>
-          <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">
-            <h2 className="font-bold text-sm tracking-tight">QuizSolver PRO</h2>
-            <p className="text-[10px] text-green-600 font-bold uppercase">v2.0.0 Stable</p>
-          </div>
-        </div>
+  // If in extension mode, we use a more compact UI
+  const sidebarClasses = cn(
+    "fixed transition-all duration-300 bg-white shadow-2xl border border-primary/10 overflow-hidden z-50 group",
+    isExtensionMode 
+      ? "bottom-0 left-0 right-0 w-full h-16 border-t rounded-none flex-row" 
+      : "right-6 top-1/2 -translate-y-1/2 w-16 hover:w-64 rounded-2xl flex-col"
+  );
 
-        <Separator />
+  return (
+    <aside className={sidebarClasses}>
+      <div className={cn("h-full flex", isExtensionMode ? "flex-row w-full items-center px-4" : "flex-col")}>
+        {/* Header/Logo - Hidden in extension mode compact view */}
+        {!isExtensionMode && (
+          <>
+            <div className="p-4 flex items-center gap-3">
+              <div className="bg-primary p-2 rounded-lg shrink-0">
+                <BrainCircuit className="h-6 w-6 text-white" />
+              </div>
+              <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 whitespace-nowrap">
+                <h2 className="font-bold text-sm tracking-tight">QuizSolver PRO</h2>
+                <p className="text-[10px] text-green-600 font-bold uppercase">v2.0.0 Stable</p>
+              </div>
+            </div>
+            <Separator />
+          </>
+        )}
 
         {/* Controls */}
-        <div className="flex-1 p-2 space-y-4 overflow-y-auto overflow-x-hidden">
-          <div className="space-y-1">
+        <div className={cn(
+          "flex-1 flex gap-2",
+          isExtensionMode ? "flex-row items-center justify-around" : "flex-col p-2 space-y-4"
+        )}>
+          <div className={cn("flex gap-1", isExtensionMode ? "flex-row" : "flex-col")}>
              <TooltipProvider delayDuration={0}>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -126,7 +142,8 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQue
                     variant={isEnabled ? "default" : "outline"} 
                     size="icon" 
                     className={cn(
-                      "w-full h-12 transition-all duration-300 rounded-xl",
+                      "transition-all duration-300 rounded-xl",
+                      isExtensionMode ? "h-10 w-10" : "w-full h-12",
                       isEnabled ? "bg-primary shadow-lg shadow-primary/20" : "bg-transparent border-primary/20"
                     )}
                     onClick={() => onToggle(!isEnabled)}
@@ -134,7 +151,7 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQue
                     <Power className="h-5 w-5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="left">
+                <TooltipContent side={isExtensionMode ? "top" : "left"}>
                   {isEnabled ? "Deactivate Engine" : "Activate PRO Engine"}
                 </TooltipContent>
               </Tooltip>
@@ -149,20 +166,20 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQue
                       <Button 
                         variant="ghost" 
                         size="icon" 
-                        className="w-full h-12 hover:bg-primary/10 hover:text-primary transition-all rounded-xl"
+                        className={cn("hover:bg-primary/10 hover:text-primary transition-all rounded-xl", isExtensionMode ? "h-10 w-10" : "w-full h-12")}
                       >
                         <Globe className="h-5 w-5" />
                       </Button>
                     </TooltipTrigger>
                   </DialogTrigger>
-                  <TooltipContent side="left">Cloud Site Scanner</TooltipContent>
+                  <TooltipContent side={isExtensionMode ? "top" : "left"}>Cloud Site Scanner</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
               <DialogContent className="sm:max-w-[425px]">
                 <DialogHeader>
                   <DialogTitle>Cloud URL Scan</DialogTitle>
                   <DialogDescription>
-                    Enter the URL of the quiz. Our AI will attempt to reach the site and extract all questions.
+                    Enter the URL of the quiz to extract all questions.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
@@ -190,20 +207,20 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQue
                       <Button 
                         variant="ghost" 
                         size="icon" 
-                        className="w-full h-12 hover:bg-primary/10 hover:text-primary transition-all rounded-xl"
+                        className={cn("hover:bg-primary/10 hover:text-primary transition-all rounded-xl", isExtensionMode ? "h-10 w-10" : "w-full h-12")}
                       >
                         <ClipboardPaste className="h-5 w-5" />
                       </Button>
                     </TooltipTrigger>
                   </DialogTrigger>
-                  <TooltipContent side="left">Manual Extraction</TooltipContent>
+                  <TooltipContent side={isExtensionMode ? "top" : "left"}>Manual Extraction</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
               <DialogContent className="sm:max-w-[425px]">
                 <DialogHeader>
                   <DialogTitle>Manual Quiz Import</DialogTitle>
                   <DialogDescription>
-                    Paste the text of the quiz question and options below if the auto-scanner cannot detect them.
+                    Paste the text of the quiz questions below.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-4 py-4">
@@ -229,56 +246,48 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQue
                   <Button 
                     variant="ghost" 
                     size="icon" 
-                    className="w-full h-12 hover:bg-primary/10 hover:text-primary transition-all rounded-xl"
+                    className={cn("hover:bg-primary/10 hover:text-primary transition-all rounded-xl", isExtensionMode ? "h-10 w-10" : "w-full h-12")}
                     onClick={onRefresh}
                   >
                     <RefreshCw className="h-5 w-5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="left">Rescan Environment</TooltipContent>
+                <TooltipContent side={isExtensionMode ? "top" : "left"}>Reset Workspace</TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </div>
 
-          <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 px-2 space-y-4">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs font-semibold">Live Mode</Label>
-              <Switch checked={isEnabled} onCheckedChange={onToggle} />
-            </div>
-            
-            <div className="bg-primary/5 p-3 rounded-xl space-y-2 border border-primary/10">
-              <div className="flex items-center gap-2 text-primary">
-                <ScanSearch className="h-4 w-4" />
-                <span className="text-xs font-bold uppercase tracking-wider">Cloud Sync</span>
+          {!isExtensionMode && (
+            <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 px-2 space-y-4">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold">Live Mode</Label>
+                <Switch checked={isEnabled} onCheckedChange={onToggle} />
               </div>
-              <div className="text-[10px] text-muted-foreground leading-relaxed">
-                <span className="text-primary font-bold">{scanCount}</span> questions cached and verified.
+              
+              <div className="bg-primary/5 p-3 rounded-xl space-y-2 border border-primary/10">
+                <div className="flex items-center gap-2 text-primary">
+                  <ScanSearch className="h-4 w-4" />
+                  <span className="text-xs font-bold uppercase tracking-wider">Cloud Sync</span>
+                </div>
+                <div className="text-[10px] text-muted-foreground leading-relaxed">
+                  <span className="text-primary font-bold">{scanCount}</span> questions cached.
+                </div>
               </div>
             </div>
-
-            <div className="bg-accent/5 p-3 rounded-xl space-y-2 border border-accent/10">
-              <div className="flex items-center gap-2 text-accent">
-                <ShieldCheck className="h-4 w-4" />
-                <span className="text-xs font-bold uppercase tracking-wider">Production</span>
-              </div>
-              <ul className="text-[10px] text-muted-foreground space-y-1 list-disc list-inside">
-                <li>End-to-end encrypted</li>
-                <li>Real-time verification</li>
-                <li>Zero-Trace solving</li>
-              </ul>
-            </div>
-          </div>
+          )}
         </div>
 
-        <Separator />
-
-        {/* Footer */}
-        <div className="p-3">
-          <Button variant="ghost" className="w-full justify-start gap-3 p-2 rounded-xl h-12 overflow-hidden hover:bg-primary/5">
-            <Settings2 className="h-5 w-5 shrink-0" />
-            <span className="text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity">PRO Configuration</span>
-          </Button>
-        </div>
+        {!isExtensionMode && (
+          <>
+            <Separator />
+            <div className="p-3">
+              <Button variant="ghost" className="w-full justify-start gap-3 p-2 rounded-xl h-12 overflow-hidden hover:bg-primary/5">
+                <Settings2 className="h-5 w-5 shrink-0" />
+                <span className="text-xs font-medium opacity-0 group-hover:opacity-100 transition-opacity">PRO Configuration</span>
+              </Button>
+            </div>
+          </>
+        )}
       </div>
     </aside>
   );
