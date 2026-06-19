@@ -1,35 +1,33 @@
-// Bridge between the Extension and the NextJS App
+// Communication bridge between the sidepanel iframe and the browser tab
 window.addEventListener('message', async (event) => {
-  const iframe = document.getElementById('solver-iframe');
+  const frame = document.getElementById('solver-frame');
   
   if (event.data.type === 'REQUEST_TAB_CONTENT') {
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       
-      if (!tab || !tab.id) {
-        throw new Error("No active tab found.");
-      }
-
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: () => {
           return {
             text: document.body.innerText,
             url: window.location.href,
-            title: document.title
+            html: document.documentElement.innerHTML
           };
         }
       });
 
-      const payload = results[0].result;
-      iframe.contentWindow.postMessage({
+      const pageData = results[0].result;
+      
+      // Send the content back to the React app inside the iframe
+      frame.contentWindow.postMessage({
         type: 'TAB_CONTENT_RESPONSE',
-        payload: payload
+        payload: pageData
       }, '*');
 
     } catch (error) {
-      console.error("Capture Error:", error);
-      iframe.contentWindow.postMessage({
+      console.error('Extraction error:', error);
+      frame.contentWindow.postMessage({
         type: 'TAB_CONTENT_ERROR',
         message: error.message
       }, '*');

@@ -67,7 +67,7 @@ const extractQuizFlow = ai.defineFlow(
           }
         });
         const html = await response.text();
-        // Fixed: Use valid 'gm' flags instead of invalid 'gmb'
+        // Fixed regex flags: removed invalid 'b'
         contentToParse = html
           .replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gm, '')
           .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gm, '')
