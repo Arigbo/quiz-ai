@@ -8,8 +8,8 @@ import {
   Settings2, 
   BrainCircuit, 
   ScanSearch,
-  ChevronRight,
-  ShieldCheck
+  ShieldCheck,
+  Info
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -48,7 +48,7 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount }: Plu
         <Separator />
 
         {/* Controls */}
-        <div className="flex-1 p-2 space-y-4">
+        <div className="flex-1 p-2 space-y-4 overflow-y-auto overflow-x-hidden">
           <div className="space-y-1">
              <TooltipProvider delayDuration={0}>
               <Tooltip>
@@ -105,18 +105,30 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount }: Plu
 
           <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300 px-2 space-y-4">
             <div className="flex items-center justify-between">
-              <Label className="text-xs">Auto-Select</Label>
+              <Label className="text-xs font-semibold">Auto-Select</Label>
               <Switch checked={isEnabled} onCheckedChange={onToggle} />
             </div>
             
             <div className="bg-primary/5 p-3 rounded-xl space-y-2 border border-primary/10">
               <div className="flex items-center gap-2 text-primary">
                 <ScanSearch className="h-4 w-4" />
-                <span className="text-xs font-bold">Scanning</span>
+                <span className="text-xs font-bold uppercase tracking-wider">Status</span>
               </div>
-              <div className="text-[10px] text-muted-foreground">
-                Current page contains <span className="text-primary font-bold">{scanCount}</span> solvable elements.
+              <div className="text-[10px] text-muted-foreground leading-relaxed">
+                Found <span className="text-primary font-bold">{scanCount}</span> solvable items on this page.
               </div>
+            </div>
+
+            <div className="bg-accent/5 p-3 rounded-xl space-y-2 border border-accent/10">
+              <div className="flex items-center gap-2 text-accent">
+                <Info className="h-4 w-4" />
+                <span className="text-xs font-bold uppercase tracking-wider">Quick Start</span>
+              </div>
+              <ul className="text-[10px] text-muted-foreground space-y-1 list-disc list-inside">
+                <li>Toggle Power to begin</li>
+                <li>AI solves one by one</li>
+                <li>Watch for verified badges</li>
+              </ul>
             </div>
           </div>
         </div>
