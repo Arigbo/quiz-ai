@@ -4,14 +4,14 @@ import React, { useState } from 'react';
 import { 
   Power, 
   RefreshCw, 
-  History, 
   Settings2, 
   BrainCircuit, 
   ScanSearch,
   ShieldCheck,
-  Info,
   ClipboardPaste,
-  Send
+  Send,
+  Globe,
+  Loader2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -34,24 +34,70 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { extractQuiz } from '@/ai/flows/extract-quiz-flow';
+import { useToast } from '@/hooks/use-toast';
+import { QuizQuestion } from '@/app/lib/quiz-data';
 
 interface PluginSidebarProps {
   isEnabled: boolean;
   onToggle: (val: boolean) => void;
   onRefresh: () => void;
   scanCount: number;
+  onQuestionsFound: (questions: QuizQuestion[]) => void;
 }
 
-export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount }: PluginSidebarProps) {
+export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQuestionsFound }: PluginSidebarProps) {
   const [manualText, setManualText] = useState("");
+  const [url, setUrl] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isUrlDialogOpen, setIsUrlDialogOpen] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
+  const { toast } = useToast();
 
-  const handleManualSubmit = () => {
-    // In a real production scenario, this would trigger a parser.
-    // For now, we simulate the 'Refresh' to show the tool is active.
-    onRefresh();
-    setIsDialogOpen(false);
-    setManualText("");
+  const handleManualSubmit = async () => {
+    setIsScanning(true);
+    try {
+      const result = await extractQuiz({ rawText: manualText });
+      onQuestionsFound(result.questions);
+      toast({
+        title: "Extraction Successful",
+        description: `Identified ${result.questions.length} questions from text.`,
+      });
+      setIsDialogOpen(false);
+      setManualText("");
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Extraction Failed",
+        description: error.message || "Could not parse quiz content.",
+      });
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const handleUrlSubmit = async () => {
+    if (!url) return;
+    setIsScanning(true);
+    try {
+      const result = await extractQuiz({ url });
+      onQuestionsFound(result.questions);
+      toast({
+        title: "Cloud Scan Successful",
+        description: `Imported ${result.questions.length} questions from ${new URL(url).hostname}.`,
+      });
+      setIsUrlDialogOpen(false);
+      setUrl("");
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Scan Failed",
+        description: "The site might be blocking our scanner. Try 'Manual Extraction' by pasting the site's text.",
+      });
+    } finally {
+      setIsScanning(false);
+    }
   };
 
   return (
@@ -88,12 +134,54 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount }: Plu
                     <Power className="h-5 w-5" />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="left" className="font-body">
+                <TooltipContent side="left">
                   {isEnabled ? "Deactivate Engine" : "Activate PRO Engine"}
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
 
+            {/* URL Scan Dialog */}
+            <Dialog open={isUrlDialogOpen} onOpenChange={setIsUrlDialogOpen}>
+              <TooltipProvider delayDuration={0}>
+                <Tooltip>
+                  <DialogTrigger asChild>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="w-full h-12 hover:bg-primary/10 hover:text-primary transition-all rounded-xl"
+                      >
+                        <Globe className="h-5 w-5" />
+                      </Button>
+                    </TooltipTrigger>
+                  </DialogTrigger>
+                  <TooltipContent side="left">Cloud Site Scanner</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <DialogContent className="sm:max-w-[425px]">
+                <DialogHeader>
+                  <DialogTitle>Cloud URL Scan</DialogTitle>
+                  <DialogDescription>
+                    Enter the URL of the quiz. Our AI will attempt to reach the site and extract all questions.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="grid gap-4 py-4">
+                  <Input 
+                    placeholder="https://exam-portal.com/test-123" 
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                  />
+                </div>
+                <DialogFooter>
+                  <Button onClick={handleUrlSubmit} disabled={isScanning || !url.trim()}>
+                    {isScanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ScanSearch className="mr-2 h-4 w-4" />}
+                    Scan Live URL
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* Manual Text Dialog */}
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
               <TooltipProvider delayDuration={0}>
                 <Tooltip>
@@ -127,8 +215,8 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount }: Plu
                   />
                 </div>
                 <DialogFooter>
-                  <Button onClick={handleManualSubmit} disabled={!manualText.trim()}>
-                    <Send className="mr-2 h-4 w-4" />
+                  <Button onClick={handleManualSubmit} disabled={isScanning || !manualText.trim()}>
+                    {isScanning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
                     Extract & Solve
                   </Button>
                 </DialogFooter>
