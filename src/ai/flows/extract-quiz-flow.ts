@@ -67,11 +67,11 @@ const extractQuizFlow = ai.defineFlow(
           }
         });
         const html = await response.text();
-        // Basic cleanup to fit in token limits
+        // Basic cleanup to fit in token limits - Fixed invalid 'gmb' flags to 'gm'
         contentToParse = html
-          .replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gmb, '')
-          .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gmb, '')
-          .replace(/<svg\b[^>]*>([\s\S]*?)<\/svg>/gmb, '')
+          .replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gm, '')
+          .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gm, '')
+          .replace(/<svg\b[^>]*>([\s\S]*?)<\/svg>/gm, '')
           .substring(0, 20000); 
       } catch (e) {
         throw new Error("Failed to fetch the URL. The website might be blocking automated access.");
