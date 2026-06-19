@@ -1,129 +1,5 @@
 // Communication bridge between the sidepanel iframe and the browser tab
 
-/**
- * Detects if the current tab is a SkillsBridge quiz page and extracts
- * structured question data directly from the React-rendered DOM.
- * Falls back to generic innerText scraping for other sites.
- */
-function extractPageContent() {
-  // ─── SkillsBridge Quiz Detection ──────────────────────────────────────────
-  // SkillsBridge quiz pages show one question at a time.
-  // The question card has a <p class="...font-medium..."> for question text
-  // and <button> elements containing option labels (A:, B:, etc.) + answer text.
-
-  const isSkillsBridge =
-    window.location.hostname.includes('skillsbridge') ||
-    document.querySelector('[class*="QuizAssessmentPlayer"]') !== null ||
-    document.querySelector('[class*="QuizQuestionCard"]') !== null;
-
-  if (isSkillsBridge || _looksLikeSkillsBridgeQuiz()) {
-    return _extractSkillsBridgeQuiz();
-  }
-
-  // ─── Generic Fallback ────────────────────────────────────────────────────
-  return {
-    text: document.body.innerText,
-    url: window.location.href,
-    html: document.documentElement.innerHTML,
-    source: 'generic'
-  };
-}
-
-function _looksLikeSkillsBridgeQuiz() {
-  // Heuristic: quiz card with numbered badge + option buttons
-  const hasBadge = document.querySelector('.bg-sb-primary\\/10, [class*="sb-primary"]');
-  const hasOptionButtons = document.querySelectorAll('button[type="button"]').length >= 2;
-  const hasProgressBar = document.querySelector('[role="progressbar"], [class*="progress"]');
-  return Boolean(hasBadge && hasOptionButtons && hasProgressBar);
-}
-
-function _extractSkillsBridgeQuiz() {
-  const questions = [];
-
-  // Strategy 1: Find all quiz question cards on the page
-  // SkillsBridge QuizQuestionCard renders:
-  //   <div class="mb-6 flex items-start gap-3"> ... <p class="pt-1 text-base font-medium ...">QUESTION TEXT</p>
-  //   Then answer buttons: <button><div class="flex items-center"><div class="...">A:</div><div>ANSWER TEXT</div></button>
-
-  // Try to find question text elements (they have pt-1, font-medium, and text content)
-  const questionCandidates = Array.from(
-    document.querySelectorAll('p[class*="font-medium"], p[class*="leading-snug"]')
-  ).filter(el => el.textContent && el.textContent.trim().length > 10);
-
-  if (questionCandidates.length > 0) {
-    questionCandidates.forEach((qEl, idx) => {
-      // Walk up to find the card container, then find sibling button elements
-      const card = qEl.closest('[class*="CardContent"], [class*="card"], .flex.items-start.gap-3')?.closest('[class*="Card"], [class*="card"]') 
-                   || qEl.closest('div[class*="py-5"], div[class*="py-8"]')
-                   || qEl.parentElement?.parentElement?.parentElement;
-
-      const questionText = qEl.textContent?.trim() || '';
-      const options = [];
-
-      if (card) {
-        // Look for option buttons within the card
-        const optionBtns = card.querySelectorAll('button[type="button"]');
-        optionBtns.forEach(btn => {
-          // Each button has a label div (A:, B:) and a text div
-          const divs = btn.querySelectorAll('div');
-          let optionText = '';
-          divs.forEach(d => {
-            const t = d.textContent?.trim() || '';
-            // Skip the label div (A:, B:, C:...) and short divs
-            if (t.length > 2 && !/^[A-Z]:$/.test(t)) {
-              optionText = t;
-            }
-          });
-          if (optionText) options.push(optionText);
-        });
-
-        // Also handle True/False buttons
-        if (options.length === 0) {
-          const tfBtns = card.querySelectorAll('button[type="button"] p[class*="font-semibold"]');
-          tfBtns.forEach(el => {
-            const t = el.textContent?.trim();
-            if (t) options.push(t);
-          });
-        }
-      }
-
-      if (questionText && options.length > 0) {
-        questions.push({ questionText, options });
-      }
-    });
-  }
-
-  // Strategy 2: If structured extraction failed, do intelligent text scraping
-  // Grab just the main content area and produce clean formatted text
-  if (questions.length === 0) {
-    const mainContent = document.querySelector('main, [role="main"], .assessment-content, #__next main')
-                        || document.body;
-    const rawText = mainContent.innerText;
-    return {
-      text: rawText,
-      url: window.location.href,
-      html: mainContent.innerHTML,
-      source: 'skillsbridge_text'
-    };
-  }
-
-  // Build structured text that the AI can parse perfectly
-  const structuredText = questions.map((q, i) => {
-    const optionLines = q.options.map((opt, j) => 
-      `  ${String.fromCharCode(65 + j)}. ${opt}`
-    ).join('\n');
-    return `Question ${i + 1}: ${q.questionText}\n${optionLines}`;
-  }).join('\n\n');
-
-  return {
-    text: structuredText,
-    url: window.location.href,
-    html: '',
-    source: 'skillsbridge_structured',
-    questions: questions // Pass structured data directly
-  };
-}
-
 // ─── Message Listener ────────────────────────────────────────────────────────
 window.addEventListener('message', async (event) => {
   const frame = document.getElementById('solver-frame');
@@ -134,74 +10,142 @@ window.addEventListener('message', async (event) => {
 
       const results = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
+        // ── This function runs INSIDE the quiz tab's page context ──────────
         func: () => {
-          // ── Inline extraction (runs inside the tab's page context) ──────────
+          const url = window.location.href;
 
-          function looksLikeSkillsBridge() {
-            const hasPrimary = document.querySelector('[class*="sb-primary"]');
-            const hasOptionBtns = document.querySelectorAll('button[type="button"]').length >= 2;
-            const hasProgress = document.querySelector('[role="progressbar"], [class*="Progress"]');
-            return Boolean(hasPrimary && hasOptionBtns && hasProgress);
+          // ─────────────────────────────────────────────────────────────────
+          // SKILLSBRIDGE EXTRACTOR
+          // Based on QuizQuestionCard.tsx DOM structure:
+          //
+          // <Card>                                          ← mt-5 gap-0 border-border
+          //   <CardContent>                                 ← px-4 py-5 sm:px-8 sm:py-8
+          //     <div class="mb-6 flex items-start gap-3">   ← question header row
+          //       <span class="...bg-sb-primary/10...">     ← question number badge
+          //       <div class="min-w-0">
+          //         <p class="pt-1 text-base font-medium leading-snug ...">
+          //           QUESTION TEXT                         ← ← ← target
+          //         </p>
+          //       </div>
+          //     </div>
+          //
+          //     <!-- Multiple-choice / True-False answers -->
+          //     <button type="button" class="...w-full...rounded-lg...border...">
+          //       <div class="flex items-center">
+          //         <div class="flex h-12 w-14 ...">        ← label column (A:, B:...)
+          //           <span>...</span>                      ← radio/checkbox dot
+          //           <span class="text-sm font-semibold text-muted-foreground">A:</span>
+          //         </div>
+          //         <div class="px-3 py-3 text-sm text-foreground ...">
+          //           ANSWER TEXT                           ← ← ← target
+          //         </div>
+          //       </div>
+          //     </button>
+          // ─────────────────────────────────────────────────────────────────
+
+          function isSkillsBridgePage() {
+            // The question number badge always has bg-sb-primary/10 as a class
+            // Tailwind writes utility classes as-is into the DOM, so this works.
+            return (
+              url.includes('skillsbridge') ||
+              document.querySelector('[class*="bg-sb-primary"]') !== null
+            );
           }
 
-          if (looksLikeSkillsBridge()) {
+          function extractSkillsBridge() {
             const questions = [];
 
-            // Find question text: large font-medium paragraphs
-            const qEls = Array.from(
-              document.querySelectorAll('p[class*="font-medium"], p[class*="leading-snug"], p[class*="text-base"]')
-            ).filter(el => {
-              const t = el.textContent?.trim() || '';
-              return t.length > 15 && !t.startsWith('Question ') && !/^\d+$/.test(t);
-            });
+            // Find question text paragraphs.
+            // They have: pt-1, font-medium, leading-snug (from the JSX)
+            // They also happen to sit inside a div.min-w-0 inside a div.flex.items-start.gap-3
+            const questionParas = Array.from(
+              document.querySelectorAll('p.font-medium.leading-snug, p[class*="font-medium"][class*="leading-snug"]')
+            ).filter(p => (p.textContent?.trim().length ?? 0) > 10);
 
-            qEls.forEach(qEl => {
-              const questionText = qEl.textContent?.trim() || '';
-              const options = [];
+            // If the exact compound selector fails, fall back to any font-medium paragraph
+            // inside the question header row (div with gap-3 + items-start)
+            if (questionParas.length === 0) {
+              const allFontMedium = Array.from(
+                document.querySelectorAll('p[class*="font-medium"]')
+              ).filter(p => {
+                const t = p.textContent?.trim() ?? '';
+                // must be meaningful text (not the question-type label which is short + uppercase)
+                return t.length > 10 && t !== t.toUpperCase();
+              });
+              questionParas.push(...allFontMedium);
+            }
 
-              // Walk up to card container
-              let container = qEl;
-              for (let i = 0; i < 8; i++) {
-                container = container.parentElement;
-                if (!container) break;
-                const btns = container.querySelectorAll('button[type="button"]');
-                if (btns.length >= 2) {
-                  btns.forEach(btn => {
-                    // Get the answer text — it's in a div without the label (A:, B:...)
-                    const innerDivs = Array.from(btn.querySelectorAll('div'));
-                    let found = '';
-                    innerDivs.forEach(d => {
-                      const t = (d.childElementCount === 0 ? d.textContent : d.innerText)?.trim() || '';
-                      if (t.length > 2 && !/^[A-Z]:$/.test(t) && !found) {
-                        found = t;
-                      }
-                    });
-                    // Fallback: get full button text and strip the label
-                    if (!found) {
-                      const btnText = btn.innerText?.trim() || '';
-                      const match = btnText.match(/^[A-Z]:\s*(.+)$/m);
-                      found = match ? match[1].trim() : btnText;
-                    }
-                    if (found && found.length > 1) options.push(found);
-                  });
+            questionParas.forEach(qPara => {
+              const questionText = qPara.textContent?.trim() ?? '';
+              if (!questionText) return;
+
+              // Walk up from the <p> to find the card container that holds the answer buttons
+              // Structure: <p> → <div.min-w-0> → <div.flex.items-start.gap-3> → <CardContent> → <Card>
+              // The answer buttons are siblings of the question header div, inside CardContent.
+              let cardContent = null;
+              let node = qPara;
+              for (let i = 0; i < 10; i++) {
+                node = node.parentElement;
+                if (!node) break;
+                // CardContent has px-4 py-5 (or sm:px-8 sm:py-8)
+                if (
+                  (node.classList.contains('px-4') && node.classList.contains('py-5')) ||
+                  node.querySelectorAll('button[type="button"]').length >= 1
+                ) {
+                  cardContent = node;
                   break;
                 }
               }
 
-              // True/False detection
-              if (options.length === 0) {
-                const tfBtns = document.querySelectorAll('button[type="button"] p[class*="font-semibold"]');
-                tfBtns.forEach(el => {
-                  const t = el.textContent?.trim();
-                  if (t) options.push(t);
-                });
+              if (!cardContent) {
+                // last resort: go up 4 levels
+                cardContent = qPara.parentElement?.parentElement?.parentElement?.parentElement ?? null;
               }
 
-              if (questionText && options.length > 0) {
+              const options = [];
+
+              if (cardContent) {
+                const answerButtons = cardContent.querySelectorAll('button[type="button"]');
+
+                answerButtons.forEach(btn => {
+                  // The answer text lives in the SECOND direct child div of <div.flex.items-center>
+                  // Structure: <button> → <div.flex.items-center> → [<div label>, <div answerText>]
+                  const flexRow = btn.querySelector('div.flex.items-center') ?? btn.querySelector('div');
+                  if (flexRow) {
+                    // The second child div contains the answer text
+                    const children = Array.from(flexRow.children).filter(el => el.tagName === 'DIV');
+                    if (children.length >= 2) {
+                      const answerText = children[children.length - 1].textContent?.trim() ?? '';
+                      if (answerText.length > 0) {
+                        options.push(answerText);
+                        return;
+                      }
+                    }
+                  }
+
+                  // Fallback: grab the whole button text and strip the label prefix (A:, B:, etc.)
+                  const raw = btn.innerText?.trim() ?? '';
+                  const match = raw.match(/^[A-Z]:\s*([\s\S]+)$/m);
+                  const answerText = match ? match[1].trim() : raw;
+                  if (answerText.length > 1) options.push(answerText);
+                });
+
+                // True / False: buttons have a <p class="...font-semibold..."> with "True" / "False"
+                if (options.length === 0) {
+                  cardContent.querySelectorAll('button[type="button"] p[class*="font-semibold"]')
+                    .forEach(p => {
+                      const t = p.textContent?.trim();
+                      if (t) options.push(t);
+                    });
+                }
+              }
+
+              if (options.length > 0) {
                 questions.push({ questionText, options });
               }
             });
 
+            // Build clean structured text for the AI
             if (questions.length > 0) {
               const structuredText = questions.map((q, i) => {
                 const opts = q.options.map((o, j) => `  ${String.fromCharCode(65 + j)}. ${o}`).join('\n');
@@ -210,20 +154,36 @@ window.addEventListener('message', async (event) => {
 
               return {
                 text: structuredText,
-                url: window.location.href,
+                url,
                 html: '',
                 source: 'skillsbridge_structured',
-                questions
+                questions,
               };
             }
+
+            // If structured extraction failed, return the main content text
+            const main = document.querySelector('main') ?? document.body;
+            return {
+              text: main.innerText,
+              url,
+              html: main.innerHTML.substring(0, 50000),
+              source: 'skillsbridge_text',
+            };
           }
 
-          // Generic fallback
+          // ─────────────────────────────────────────────────────────────────
+          // DISPATCH
+          // ─────────────────────────────────────────────────────────────────
+          if (isSkillsBridgePage()) {
+            return extractSkillsBridge();
+          }
+
+          // Generic fallback for any other quiz site
           return {
             text: document.body.innerText,
-            url: window.location.href,
-            html: document.documentElement.innerHTML.substring(0, 40000),
-            source: 'generic'
+            url,
+            html: document.documentElement.innerHTML.substring(0, 50000),
+            source: 'generic',
           };
         }
       });
