@@ -1,17 +1,17 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { PluginSidebar } from '@/components/plugin-sidebar';
 import { QuizItem } from '@/components/quiz-item';
 import { mockQuiz } from '@/app/lib/quiz-data';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { BrainCircuit, Search, Globe, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
+import { Globe, ChevronLeft, ChevronRight, Lock } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 
 export default function Home() {
-  const [isEnabled, setIsEnabled] = useState(true);
+  const [isEnabled, setIsEnabled] = useState(false);
   const [solvedCount, setSolvedCount] = useState(0);
   const [progress, setProgress] = useState(0);
 
@@ -78,6 +78,7 @@ export default function Home() {
                 <QuizItem 
                   key={q.id} 
                   data={q} 
+                  index={idx}
                   isActive={isEnabled}
                   autoSolve={isEnabled}
                   onSolve={onSolveResult}

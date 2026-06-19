@@ -6,28 +6,37 @@ import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { BrainCircuit, CheckCircle2, Loader2, Sparkles } from 'lucide-react';
+import { CheckCircle2, Loader2, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { QuizQuestion } from '@/app/lib/quiz-data';
 import { autoAnswerQuizQuestion, AutoAnswerQuizQuestionOutput } from '@/ai/flows/auto-answer-quiz-question';
+import { useToast } from '@/hooks/use-toast';
 
 interface QuizItemProps {
   data: QuizQuestion;
   isActive: boolean;
   autoSolve: boolean;
   onSolve: (result: AutoAnswerQuizQuestionOutput) => void;
+  index: number;
 }
 
-export function QuizItem({ data, isActive, autoSolve, onSolve }: QuizItemProps) {
+export function QuizItem({ data, isActive, autoSolve, onSolve, index }: QuizItemProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [answer, setAnswer] = useState<AutoAnswerQuizQuestionOutput | null>(null);
   const [selectedValue, setSelectedValue] = useState<string | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (isActive && autoSolve && !answer && !isAnalyzing) {
-      handleSolve();
+      // Stagger AI requests to prevent rate limit (5 RPM for Gemini Flash Free Tier)
+      const staggerDelay = index * 2500; 
+      const timer = setTimeout(() => {
+        handleSolve();
+      }, staggerDelay);
+      
+      return () => clearTimeout(timer);
     }
-  }, [isActive, autoSolve]);
+  }, [isActive, autoSolve, index, answer]);
 
   const handleSolve = async () => {
     setIsAnalyzing(true);
@@ -44,8 +53,16 @@ export function QuizItem({ data, isActive, autoSolve, onSolve }: QuizItemProps) 
         onSolve(result);
       }, 800);
       
-    } catch (error) {
+    } catch (error: any) {
       console.error("AI Error:", error);
+      // Surface quota issues specifically
+      if (error.message?.includes("429") || error.message?.includes("quota") || error.message?.includes("RESOURCE_EXHAUSTED")) {
+        toast({
+          variant: "destructive",
+          title: "AI Rate Limit Reached",
+          description: "You've exceeded the Gemini API quota. Please wait a moment before trying again.",
+        });
+      }
     } finally {
       setIsAnalyzing(false);
     }
