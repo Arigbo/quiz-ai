@@ -2,10 +2,17 @@
   "manifest_version": 3,
   "name": "QuizSolver AI PRO",
   "version": "2.0.0",
-  "description": "AI-powered quiz assistant that lives in your browser side panel.",
-  "permissions": ["sidePanel"],
+  "description": "Expert AI assistant for automated quiz solving and testing verification.",
+  "permissions": [
+    "sidePanel",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://quiz-ai-kappa.vercel.app/*"
+  ],
   "action": {
-    "default_title": "Open QuizSolver"
+    "default_title": "Open QuizSolver AI"
   },
   "side_panel": {
     "default_path": "sidepanel.html"

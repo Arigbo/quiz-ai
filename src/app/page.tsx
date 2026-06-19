@@ -11,22 +11,63 @@ import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { useSearchParams } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { extractQuiz } from '@/ai/flows/extract-quiz-flow';
+import { useToast } from '@/hooks/use-toast';
 
 function QuizContent() {
   const searchParams = useSearchParams();
+  const { toast } = useToast();
   const [isExtensionMode, setIsExtensionMode] = useState(false);
   const [isEnabled, setIsEnabled] = useState(false);
   const [questions, setQuestions] = useState<QuizQuestion[]>(mockQuiz);
   const [solvedCount, setSolvedCount] = useState(0);
   const [progress, setProgress] = useState(0);
+  const [isCapturing, setIsCapturing] = useState(false);
 
   useEffect(() => {
-    // Detect if we are running as a browser extension sidepanel
     if (searchParams.get('mode') === 'extension') {
       setIsExtensionMode(true);
-      setIsEnabled(true); // Default to active in extension mode
+      setIsEnabled(true);
     }
-  }, [searchParams]);
+
+    // Listen for tab content from the extension shell
+    const handleMessage = async (event: MessageEvent) => {
+      if (event.data.type === 'TAB_CONTENT_RESPONSE') {
+        setIsCapturing(true);
+        try {
+          const result = await extractQuiz({ 
+            rawText: event.data.payload.text,
+            url: event.data.payload.url 
+          });
+          setQuestions(result.questions);
+          setSolvedCount(0);
+          setProgress(0);
+          toast({
+            title: "Tab Scanned",
+            description: `Successfully extracted ${result.questions.length} questions from the page.`,
+          });
+        } catch (err: any) {
+          toast({
+            variant: "destructive",
+            title: "Extraction Error",
+            description: "Could not parse quiz from page. Try manual paste.",
+          });
+        } finally {
+          setIsCapturing(false);
+        }
+      } else if (event.data.type === 'TAB_CONTENT_ERROR') {
+        toast({
+          variant: "destructive",
+          title: "Capture Failed",
+          description: event.data.message || "Ensure you are on a valid webpage.",
+        });
+        setIsCapturing(false);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [searchParams, toast]);
 
   const handleRefresh = () => {
     setSolvedCount(0);
@@ -49,9 +90,14 @@ function QuizContent() {
     setIsEnabled(true);
   };
 
+  const handleRequestCapture = () => {
+    setIsCapturing(true);
+    // Ask the extension shell to give us the tab content
+    window.parent.postMessage({ type: 'REQUEST_TAB_CONTENT' }, '*');
+  };
+
   return (
     <div className="h-screen flex flex-col bg-background selection:bg-accent/30">
-      {/* Simulated Browser Navbar - Only show if NOT in extension mode */}
       {!isExtensionMode && (
         <header className="h-14 border-b bg-white flex items-center px-4 gap-4 z-20 shadow-sm">
           <div className="flex gap-1.5 shrink-0">
@@ -74,13 +120,11 @@ function QuizContent() {
         </header>
       )}
 
-      {/* Main Content Area */}
       <main className="flex-1 flex overflow-hidden relative">
         <div className={cn(
           "flex-1 flex flex-col overflow-hidden bg-slate-50/50",
           isExtensionMode ? "p-4" : "p-8 lg:p-12"
         )}>
-          {/* Quiz Header */}
           <div className={cn("max-w-4xl mx-auto w-full", isExtensionMode ? "mb-6" : "mb-12")}>
             <div className="flex flex-wrap items-center gap-2 mb-4">
               <Badge variant="secondary" className="bg-green-100 text-green-700 border-green-200">
@@ -88,10 +132,10 @@ function QuizContent() {
                 {isExtensionMode ? "Active Extension" : "Verified Session"}
               </Badge>
               <Badge variant="outline" className="border-accent/30 text-accent">v2.0.0 Stable</Badge>
-              {questions !== mockQuiz && (
-                <Badge variant="default" className="bg-primary text-white">
-                  <Layers className="w-3 h-3 mr-1" />
-                  Cloud Source
+              {isCapturing && (
+                <Badge variant="default" className="bg-accent text-white animate-pulse">
+                  <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                  Capturing Tab...
                 </Badge>
               )}
             </div>
@@ -101,11 +145,6 @@ function QuizContent() {
             )}>
               {questions === mockQuiz ? "Exam Assistant Active" : "Imported Session"}
             </h1>
-            {!isExtensionMode && (
-              <p className="text-slate-500 text-lg mb-8">
-                Production deployment environment. Ensure all answers are verified before final submission.
-              </p>
-            )}
             
             <div className="space-y-3 bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
               <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest text-slate-400">
@@ -117,7 +156,7 @@ function QuizContent() {
           </div>
 
           <ScrollArea className="flex-1 max-w-4xl mx-auto w-full">
-            <div className={cn("space-y-4", isExtensionMode ? "pb-20" : "pb-32")}>
+            <div className={cn("space-y-4", isExtensionMode ? "pb-24" : "pb-32")}>
               {questions.map((q, idx) => (
                 <QuizItem 
                   key={q.id} 
@@ -137,7 +176,6 @@ function QuizContent() {
           </ScrollArea>
         </div>
 
-        {/* Plugin UI Overlay Component */}
         <PluginSidebar 
           isEnabled={isEnabled} 
           onToggle={setIsEnabled} 
@@ -145,10 +183,11 @@ function QuizContent() {
           scanCount={questions.length}
           onQuestionsFound={handleQuestionsFound}
           isExtensionMode={isExtensionMode}
+          onRequestCapture={handleRequestCapture}
+          isCapturing={isCapturing}
         />
       </main>
 
-      {/* Floating Status Bar - Hide in extension mode */}
       {!isExtensionMode && (
         <footer className="h-10 border-t bg-white px-6 flex items-center justify-between text-[10px] font-bold uppercase tracking-widest text-muted-foreground shrink-0 z-20">
           <div className="flex items-center gap-4">

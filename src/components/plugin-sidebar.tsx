@@ -1,4 +1,3 @@
-
 "use client";
 
 import React, { useState } from 'react';
@@ -12,7 +11,8 @@ import {
   ClipboardPaste,
   Send,
   Globe,
-  Loader2
+  Loader2,
+  ScanEye
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -47,9 +47,20 @@ interface PluginSidebarProps {
   scanCount: number;
   onQuestionsFound: (questions: QuizQuestion[]) => void;
   isExtensionMode?: boolean;
+  onRequestCapture?: () => void;
+  isCapturing?: boolean;
 }
 
-export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQuestionsFound, isExtensionMode }: PluginSidebarProps) {
+export function PluginSidebar({ 
+  isEnabled, 
+  onToggle, 
+  onRefresh, 
+  scanCount, 
+  onQuestionsFound, 
+  isExtensionMode,
+  onRequestCapture,
+  isCapturing 
+}: PluginSidebarProps) {
   const [manualText, setManualText] = useState("");
   const [url, setUrl] = useState("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -102,7 +113,6 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQue
     }
   };
 
-  // If in extension mode, we use a more compact UI
   const sidebarClasses = cn(
     "fixed transition-all duration-300 bg-white shadow-2xl border border-primary/10 overflow-hidden z-50 group",
     isExtensionMode 
@@ -113,7 +123,6 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQue
   return (
     <aside className={sidebarClasses}>
       <div className={cn("h-full flex", isExtensionMode ? "flex-row w-full items-center px-4" : "flex-col")}>
-        {/* Header/Logo - Hidden in extension mode compact view */}
         {!isExtensionMode && (
           <>
             <div className="p-4 flex items-center gap-3">
@@ -129,7 +138,6 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQue
           </>
         )}
 
-        {/* Controls */}
         <div className={cn(
           "flex-1 flex gap-2",
           isExtensionMode ? "flex-row items-center justify-around" : "flex-col p-2 space-y-4"
@@ -157,7 +165,26 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQue
               </Tooltip>
             </TooltipProvider>
 
-            {/* URL Scan Dialog */}
+            {/* Extension Tab Capture Button */}
+            {isExtensionMode && (
+              <TooltipProvider delayDuration={0}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-10 w-10 hover:bg-accent/10 hover:text-accent rounded-xl"
+                      onClick={onRequestCapture}
+                      disabled={isCapturing}
+                    >
+                      {isCapturing ? <Loader2 className="h-5 w-5 animate-spin" /> : <ScanEye className="h-5 w-5" />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Scan Current Page</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+
             <Dialog open={isUrlDialogOpen} onOpenChange={setIsUrlDialogOpen}>
               <TooltipProvider delayDuration={0}>
                 <Tooltip>
@@ -198,7 +225,6 @@ export function PluginSidebar({ isEnabled, onToggle, onRefresh, scanCount, onQue
               </DialogContent>
             </Dialog>
 
-            {/* Manual Text Dialog */}
             <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
               <TooltipProvider delayDuration={0}>
                 <Tooltip>

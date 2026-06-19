@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>QuizSolver AI Sidepanel</title>
+  <title>QuizSolver AI Side Panel</title>
   <style>
     body, html {
       margin: 0;
@@ -9,7 +9,6 @@
       height: 100%;
       width: 100%;
       overflow: hidden;
-      background: #f8fafc;
     }
     iframe {
       border: none;
@@ -19,6 +18,7 @@
   </style>
 </head>
 <body>
-  <iframe src="https://quiz-ai-kappa.vercel.app?mode=extension" allow="clipboard-read; clipboard-write"></iframe>
+  <iframe id="solver-iframe" src="https://quiz-ai-kappa.vercel.app?mode=extension"></iframe>
+  <script src="sidepanel.js"></script>
 </body>
 </html>
