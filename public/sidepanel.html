@@ -1,18 +1,41 @@
-
 <!DOCTYPE html>
 <html>
-<head>
-  <title>QuizSolver AI</title>
-  <style>
-    body, html { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; background: #f8fafc; }
-    iframe { border: none; width: 100%; height: 100%; }
-  </style>
-</head>
-<body>
-  <!-- Point this to your hosted URL in production, or localhost for development -->
-  <iframe src="http://localhost:9002?mode=extension" id="app-frame"></iframe>
-  <script>
-    // Optional: Sync the iframe URL with the current active tab for smarter context
-  </script>
-</body>
+  <head>
+    <meta charset="utf-8">
+    <title>QuizSolver AI</title>
+    <style>
+      body, html { 
+        margin: 0; 
+        padding: 0; 
+        height: 100%; 
+        width: 100%;
+        overflow: hidden; 
+        background: #f8fafc;
+      }
+      iframe { 
+        border: none; 
+        width: 100%; 
+        height: 100%; 
+      }
+      .loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        font-family: system-ui, -apple-system, sans-serif;
+        color: #64748b;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- In development, points to localhost. Update this to your production URL after deployment. -->
+    <iframe id="app-frame" src="http://localhost:9002?mode=extension"></iframe>
+    <script>
+      // Simple error handling for the iframe
+      const frame = document.getElementById('app-frame');
+      frame.onerror = function() {
+        document.body.innerHTML = '<div class="loading">Connect to your local dev server (npm run dev) or update the URL in sidepanel.html</div>';
+      };
+    </script>
+  </body>
 </html>

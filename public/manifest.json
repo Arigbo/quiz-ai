@@ -1,17 +1,18 @@
-
 {
   "manifest_version": 3,
   "name": "QuizSolver AI PRO",
   "version": "2.0.0",
-  "description": "Expert AI testing assistant for any website.",
+  "description": "Expert AI assistant for quiz solving and question extraction.",
   "permissions": ["sidePanel", "activeTab"],
-  "background": {
-    "service_worker": "background.js"
-  },
   "action": {
-    "default_title": "Click to open QuizSolver"
+    "default_title": "Open QuizSolver Side Panel"
   },
   "side_panel": {
     "default_path": "sidepanel.html"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
   }
 }
