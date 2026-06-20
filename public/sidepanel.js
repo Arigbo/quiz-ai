@@ -264,45 +264,7 @@ function extractSkillsBridgeQuestion() {
 
 // ─── Injected into the quiz tab: click the answer button + show toast ─────────
 function clickAnswerOnPage(correctIndex, correctAnswer, optionLetter) {
-  // Re-run the same button discovery logic to find the correct button
-  let answerButtons = [];
-
-  const questionParas = Array.from(
-    document.querySelectorAll('p[class*="font-medium"][class*="leading-snug"]')
-  ).filter(p => (p.textContent?.trim().length ?? 0) > 10);
-
-  const questionEl = questionParas[0] ?? null;
-
-  if (questionEl) {
-    let node = questionEl;
-    for (let depth = 0; depth < 15; depth++) {
-      node = node.parentElement;
-      if (!node || node === document.body) break;
-      const btns = Array.from(node.querySelectorAll('button[type="button"]'));
-      if (btns.length >= 2) { answerButtons = btns; break; }
-    }
-
-    if (answerButtons.length === 0) {
-      const headerRow = questionEl.closest('[class*="gap-3"]') ?? questionEl.parentElement?.parentElement;
-      if (headerRow?.nextElementSibling) {
-        const btns = Array.from(headerRow.nextElementSibling.querySelectorAll('button[type="button"]'));
-        if (btns.length >= 1) answerButtons = btns;
-      }
-    }
-  }
-
-  if (answerButtons.length === 0) {
-    // Fallback
-    const NAV = new Set(['next', 'previous', 'prev', 'submit', 'back', 'finish', 'save', 'cancel', 'skip', 'continue']);
-    answerButtons = Array.from(document.querySelectorAll('button[type="button"]')).filter(btn => {
-      const t = (btn.textContent ?? '').trim().toLowerCase();
-      return t.length > 1 && !NAV.has(t) && t.length < 300;
-    });
-  }
-
-  const target = answerButtons[correctIndex];
-
-  // Inject animation styles once
+  // ── Inject styles once ────────────────────────────────────────────────────
   if (!document.getElementById('quiz-ai-styles')) {
     const style = document.createElement('style');
     style.id = 'quiz-ai-styles';
@@ -311,55 +273,67 @@ function clickAnswerOnPage(correctIndex, correctAnswer, optionLetter) {
         from { opacity: 0; transform: translateY(16px) scale(.95); }
         to   { opacity: 1; transform: translateY(0) scale(1); }
       }
-      @keyframes quizAiPulse {
-        0%,100% { box-shadow: 0 0 0 0 rgba(99,102,241,.5); }
-        50%      { box-shadow: 0 0 0 8px rgba(99,102,241,0); }
-      }
     `;
     document.head.appendChild(style);
   }
 
-  if (target) {
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    setTimeout(() => {
-      target.click();
-      // Briefly highlight the clicked button
-      const prev = target.style.cssText;
-      target.style.outline = '3px solid #6366f1';
-      target.style.animation = 'quizAiPulse 0.6s ease';
-      setTimeout(() => { target.style.outline = prev; target.style.animation = ''; }, 1800);
-      showToast(`✅ AI selected: ${optionLetter}. ${correctAnswer}`, 'success');
-    }, 350);
-  } else {
-    showToast(`⚠️ AI answer: ${optionLetter}. ${correctAnswer} — button not found, click manually`, 'warn');
+  // ── Re-discover answer buttons fresh (avoid stale refs) ───────────────────
+  function findAnswerButtons() {
+    // Strategy 1: walk up from question paragraph
+    const qParas = Array.from(
+      document.querySelectorAll('p[class*="font-medium"][class*="leading-snug"]')
+    ).filter(p => (p.textContent?.trim().length ?? 0) > 10);
+
+    if (qParas.length > 0) {
+      let node = qParas[0];
+      for (let d = 0; d < 15; d++) {
+        node = node.parentElement;
+        if (!node || node === document.body) break;
+        const btns = Array.from(node.querySelectorAll('button[type="button"]'));
+        if (btns.length >= 2) return btns;
+      }
+      // Strategy 2: sibling of question header row
+      const headerRow = qParas[0].closest('[class*="gap-3"]') ?? qParas[0].parentElement?.parentElement;
+      if (headerRow?.nextElementSibling) {
+        const btns = Array.from(headerRow.nextElementSibling.querySelectorAll('button[type="button"]'));
+        if (btns.length >= 1) return btns;
+      }
+    }
+
+    // Strategy 3: all page buttons minus nav
+    const NAV = new Set(['next','previous','prev','submit','back','finish','save','cancel','skip','continue']);
+    return Array.from(document.querySelectorAll('button[type="button"]')).filter(btn => {
+      const t = (btn.textContent ?? '').trim().toLowerCase();
+      return t.length > 1 && !NAV.has(t) && t.length < 300;
+    });
   }
 
+  // ── React-safe click: dispatchEvent bubbles through React's event system ──
+  function reactClick(el) {
+    el.focus();
+    // MouseEvent with bubbles:true is required for React's synthetic event system
+    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
+    el.dispatchEvent(new MouseEvent('mouseup',   { bubbles: true, cancelable: true, view: window }));
+    el.dispatchEvent(new MouseEvent('click',     { bubbles: true, cancelable: true, view: window }));
+  }
+
+  // ── Toast helper ──────────────────────────────────────────────────────────
   function showToast(message, type) {
     const existing = document.getElementById('quiz-ai-toast');
     if (existing) existing.remove();
-
     const toast = document.createElement('div');
     toast.id = 'quiz-ai-toast';
     toast.style.cssText = `
-      position: fixed;
-      bottom: 24px;
-      right: 24px;
-      z-index: 2147483647;
-      max-width: 380px;
-      padding: 14px 18px;
-      border-radius: 12px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
-      font-size: 13px;
-      font-weight: 500;
-      line-height: 1.5;
-      color: #fff;
-      backdrop-filter: blur(12px);
-      box-shadow: 0 8px 32px rgba(0,0,0,.35);
-      animation: quizAiSlideIn .3s cubic-bezier(.34,1.56,.64,1);
-      cursor: pointer;
+      position:fixed; bottom:24px; right:24px; z-index:2147483647;
+      max-width:380px; padding:14px 18px; border-radius:12px;
+      font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;
+      font-size:13px; font-weight:500; line-height:1.5; color:#fff;
+      box-shadow:0 8px 32px rgba(0,0,0,.4);
+      animation:quizAiSlideIn .3s cubic-bezier(.34,1.56,.64,1);
+      cursor:pointer;
       ${type === 'success'
-        ? 'background: linear-gradient(135deg, rgba(22,163,74,.95), rgba(5,150,105,.95)); border: 1px solid rgba(34,197,94,.4);'
-        : 'background: linear-gradient(135deg, rgba(217,119,6,.95), rgba(180,83,9,.95)); border: 1px solid rgba(251,191,36,.4);'}
+        ? 'background:linear-gradient(135deg,rgba(22,163,74,.97),rgba(5,150,105,.97));border:1px solid rgba(34,197,94,.4);'
+        : 'background:linear-gradient(135deg,rgba(217,119,6,.97),rgba(180,83,9,.97));border:1px solid rgba(251,191,36,.4);'}
     `;
     toast.textContent = message;
     toast.title = 'Click to dismiss';
@@ -367,6 +341,41 @@ function clickAnswerOnPage(correctIndex, correctAnswer, optionLetter) {
     document.body.appendChild(toast);
     setTimeout(() => toast?.remove(), 7000);
   }
+
+  // ── Main: find, scroll, click ─────────────────────────────────────────────
+  const answerButtons = findAnswerButtons();
+  const target = answerButtons[correctIndex] ?? null;
+
+  if (!target) {
+    showToast(`⚠️ Button not found. AI says: ${optionLetter}. ${correctAnswer} — click manually`, 'warn');
+    return;
+  }
+
+  // Scroll into view, wait for scroll to settle, then click
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  setTimeout(() => {
+    // Re-find the button right before clicking in case React re-rendered
+    const freshButtons = findAnswerButtons();
+    const freshTarget = freshButtons[correctIndex] ?? target;
+
+    // Highlight the button so user can see what's being selected
+    const origOutline = freshTarget.style.outline;
+    const origTransition = freshTarget.style.transition;
+    freshTarget.style.transition = 'outline 0.1s';
+    freshTarget.style.outline = '3px solid #6366f1';
+
+    // React-safe click
+    reactClick(freshTarget);
+
+    // Remove highlight after a moment
+    setTimeout(() => {
+      freshTarget.style.outline = origOutline;
+      freshTarget.style.transition = origTransition;
+    }, 1500);
+
+    showToast(`✅ Answered: ${optionLetter}. ${correctAnswer}`, 'success');
+  }, 400);
 }
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
