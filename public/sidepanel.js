@@ -7,11 +7,18 @@ const API_BASE = 'https://quiz-ai-kappa.vercel.app';
 const btnFullQuiz    = document.getElementById('btn-full-quiz');
 const btnOneQuestion = document.getElementById('btn-one-question');
 const btnStop        = document.getElementById('btn-stop');
-const statusArea     = document.getElementById('status-area');
-const statusBox      = document.getElementById('status-box');
-const logList        = document.getElementById('log-list');
+const quizStatusArea = document.getElementById('quiz-status-area');
+const quizStatusBox  = document.getElementById('quiz-status-box');
+const logList        = document.getElementById('quiz-log-list');
 const progressWrap   = document.getElementById('progress-wrap');
 const progressBar    = document.getElementById('progress-bar');
+
+// Project refs
+const btnGenerateProject = document.getElementById('btn-generate-project');
+const btnReadBrief       = document.getElementById('btn-read-brief');
+const projectTopic       = document.getElementById('project-topic');
+const projStatusArea     = document.getElementById('project-status-area');
+const projStatusBox      = document.getElementById('project-status-box');
 
 let stopRequested = false;
 let isRunning     = false;  // global guard — prevents concurrent runs
@@ -494,14 +501,14 @@ async function callAIWithRetry(question, options, questionNumber, maxRetries = 8
 }
 
 
-// ─── UI helpers ───────────────────────────────────────────────────────────────
+// ─── Quiz UI helpers ─────────────────────────────────────────────────────────
 function showStatus(type, html) {
-  statusArea.style.display = 'block';
-  statusBox.className = `status-box ${type}`;
+  quizStatusArea.style.display = 'block';
+  quizStatusBox.className = `status-box ${type}`;
   if (type === 'loading') {
-    statusBox.innerHTML = `<div class="spinner"></div><span style="white-space:pre-wrap">${html}</span>`;
+    quizStatusBox.innerHTML = `<div class="spinner"></div><span style="white-space:pre-wrap">${html}</span>`;
   } else {
-    statusBox.innerHTML = html;
+    quizStatusBox.innerHTML = html;
   }
 }
 
@@ -531,4 +538,235 @@ function setRunning(running) {
     progressWrap.style.display = 'none';
     progressBar.style.width    = '0%';
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PROJECT MODE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Project UI helpers ───────────────────────────────────────────────────────
+function showProjStatus(type, html) {
+  projStatusArea.style.display = 'block';
+  projStatusBox.className = `status-box ${type}`;
+  if (type === 'loading') {
+    projStatusBox.innerHTML = `<div class="spinner"></div><span style="white-space:pre-wrap">${html}</span>`;
+  } else {
+    projStatusBox.innerHTML = html;
+  }
+}
+function setProjLoading(loading) {
+  btnGenerateProject.disabled = loading;
+  btnReadBrief.disabled       = loading;
+  btnGenerateProject.innerHTML = loading
+    ? '<div class="spinner" style="border-color:rgba(255,255,255,.3);border-top-color:#fff"></div> Generating…'
+    : '<span>✍️</span> Write & Fill Project';
+}
+
+// ─── Read brief button ────────────────────────────────────────────────────────
+btnReadBrief.addEventListener('click', async () => {
+  setProjLoading(true);
+  showProjStatus('loading', 'Reading project brief…');
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const result = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: extractProjectBrief,
+    });
+    const brief = result[0]?.result;
+    if (!brief || !brief.title) {
+      showProjStatus('error', '❌ No project brief found on this page. Make sure you are on a SkillsBridge project page.');
+      return;
+    }
+    showProjStatus('success',
+      `<div class="answer-label">📋 Project Brief Found:</div>` +
+      `<div class="answer-text" style="font-size:11px;margin-top:4px">` +
+      `<strong>${brief.title}</strong><br>` +
+      `<span style="color:#94a3b8;font-weight:400">${brief.description.slice(0, 150)}${brief.description.length > 150 ? '…' : ''}</span>` +
+      `</div>`
+    );
+  } catch(err) {
+    showProjStatus('error', `❌ ${err.message}`);
+  } finally {
+    setProjLoading(false);
+  }
+});
+
+// ─── Generate & fill project ──────────────────────────────────────────────────
+btnGenerateProject.addEventListener('click', async () => {
+  if (isRunning) return;
+  isRunning = true;
+  setProjLoading(true);
+  showProjStatus('loading', 'Reading project brief from page…');
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    // 1. Extract brief from page
+    const extractResult = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: extractProjectBrief,
+    });
+    const brief = extractResult[0]?.result;
+
+    if (!brief || !brief.title) {
+      showProjStatus('error', '❌ No project brief found. Make sure you are on a SkillsBridge project submission page.');
+      return;
+    }
+
+    showProjStatus('loading',
+      `Found: "${brief.title.slice(0, 50)}${brief.title.length > 50 ? '…' : ''}"
+
+Generating content with AI…`);
+
+    // 2. Rate-limit check
+    const now  = Date.now();
+    const wait = MIN_REQUEST_GAP_MS - (now - lastRequestAt);
+    if (wait > 0) await sleep(wait);
+    lastRequestAt = Date.now();
+
+    // 3. Call AI
+    const res = await fetch(`${API_BASE}/api/generate-project`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        projectTitle:       brief.title,
+        projectDescription: brief.description,
+        requirements:       brief.requirements,
+        userTopic:          projectTopic.value.trim() || undefined,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `API error ${res.status}`);
+    }
+
+    const { content } = await res.json();
+    if (!content) throw new Error('AI returned empty content');
+
+    showProjStatus('loading', 'Filling text field on page…');
+
+    // 4. Inject content into the page textarea
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: fillProjectTextarea,
+      args: [content],
+    });
+
+    const wordCount = content.trim().split(/\s+/).filter(Boolean).length;
+    showProjStatus('success',
+      `✅ Done! ${wordCount} words written into the project field.<br>` +
+      `<span style="font-size:10px;color:#64748b">Review it, then click Save Draft or Submit Project.</span>`
+    );
+
+  } catch(err) {
+    showProjStatus('error', `❌ ${err.message}`);
+  } finally {
+    isRunning = false;
+    setProjLoading(false);
+  }
+});
+
+// ─── Injected: extract project brief from SkillsBridge page ───────────────────
+/**
+ * ProjectAssessmentSubmission.tsx DOM:
+ *
+ * Card 1 (Project Brief):
+ *   <section>
+ *     <h3>Project Title</h3>    <p>{brief.title}</p>
+ *   </section>
+ *   <section>
+ *     <h3>Project Description</h3>  <p>{brief.description}</p>
+ *   </section>
+ *   <section>
+ *     <h3>Submission Requirements</h3>
+ *     <div class="...rounded-xl border...">  ← each requirement
+ *       <p class="...uppercase...">LABEL</p>
+ *       <div class="prose...">{content}</div>
+ *     </div>
+ *   </section>
+ *
+ * Card 2 (Project Details):
+ *   <textarea placeholder="Write your project response here...">
+ */
+function extractProjectBrief() {
+  let title = '';
+  let description = '';
+  let requirements = '';
+
+  // Find all <section> elements containing h3 headings
+  const sections = document.querySelectorAll('section');
+
+  sections.forEach(section => {
+    const h3 = section.querySelector('h3');
+    if (!h3) return;
+    const heading = h3.textContent?.trim().toLowerCase() ?? '';
+
+    if (heading.includes('project title')) {
+      const p = section.querySelector('p');
+      title = p?.textContent?.trim() ?? '';
+    } else if (heading.includes('description')) {
+      const p = section.querySelector('p');
+      description = p?.textContent?.trim() ?? '';
+    } else if (heading.includes('requirement')) {
+      // Collect all requirement blocks
+      const blocks = section.querySelectorAll('[class*="rounded-xl"][class*="border"]');
+      const parts = [];
+      blocks.forEach(block => {
+        const label = block.querySelector('p[class*="uppercase"]')?.textContent?.trim();
+        const body  = block.querySelector('[class*="prose"], p:not([class*="uppercase"])')?.textContent?.trim();
+        if (body) parts.push(label ? `${label}: ${body}` : body);
+      });
+      requirements = parts.join('\n');
+    }
+  });
+
+  // Fallback: if no sections found, scrape the whole page text
+  if (!title) {
+    const mainText = document.querySelector('main')?.innerText ?? document.body.innerText;
+    return { title: null, description: mainText.slice(0, 800), requirements: '', raw: true };
+  }
+
+  return { title, description, requirements };
+}
+
+// ─── Injected: fill the project textarea with AI content ─────────────────────
+function fillProjectTextarea(content) {
+  // ProjectAssessmentSubmission: <Textarea placeholder="Write your project response here...">
+  const textarea =
+    document.querySelector('textarea[placeholder*="project response"]') ??
+    document.querySelector('textarea[placeholder*="Write your"]') ??
+    document.querySelector('textarea[class*="min-h"]');
+
+  if (!textarea) {
+    // Show on-page toast if textarea not found
+    alert('QuizAI: Could not find the project text field. Make sure you are on the submission page.');
+    return;
+  }
+
+  // Focus textarea
+  textarea.focus();
+
+  // Set the value via React's internal setter so onChange fires
+  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+    window.HTMLTextAreaElement.prototype, 'value'
+  )?.set;
+
+  if (nativeInputValueSetter) {
+    nativeInputValueSetter.call(textarea, content);
+  } else {
+    textarea.value = content;
+  }
+
+  // Dispatch an input event so React state updates
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  textarea.dispatchEvent(new Event('change', { bubbles: true }));
+
+  // Scroll to the textarea
+  textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  // Show a brief highlight
+  const orig = textarea.style.outline;
+  textarea.style.outline = '2px solid #6366f1';
+  setTimeout(() => { textarea.style.outline = orig; }, 2000);
 }
