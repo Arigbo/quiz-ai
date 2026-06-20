@@ -14,10 +14,22 @@ const progressWrap   = document.getElementById('progress-wrap');
 const progressBar    = document.getElementById('progress-bar');
 
 let stopRequested = false;
+let isRunning     = false;  // global guard — prevents concurrent runs
+let lastRequestAt = 0;      // timestamp of last API call (ms)
+
+// Free-tier rate limit: 20 RPM → 1 request per 3 s.
+// We use 3.5 s to give a comfortable margin.
+const MIN_REQUEST_GAP_MS = 3500;
 
 // ─── Button handlers ──────────────────────────────────────────────────────────
-btnFullQuiz.addEventListener('click', () => runQuiz({ autoAdvance: true }));
-btnOneQuestion.addEventListener('click', () => runQuiz({ autoAdvance: false }));
+btnFullQuiz.addEventListener('click', () => {
+  if (isRunning) return; // ignore if already running
+  runQuiz({ autoAdvance: true });
+});
+btnOneQuestion.addEventListener('click', () => {
+  if (isRunning) return;
+  runQuiz({ autoAdvance: false });
+});
 btnStop.addEventListener('click', () => {
   stopRequested = true;
   showStatus('error', '⛔ Stopping after current question…');
@@ -25,6 +37,8 @@ btnStop.addEventListener('click', () => {
 
 // ─── Main orchestrator ────────────────────────────────────────────────────────
 async function runQuiz({ autoAdvance }) {
+  if (isRunning) return;       // safety: block concurrent calls
+  isRunning     = true;
   stopRequested = false;
   setRunning(true);
   clearLog();
@@ -79,7 +93,18 @@ async function runQuiz({ autoAdvance }) {
         break;
       }
 
-      // ── 2. Ask AI (with quota-exceeded retry) ───────────────────────────
+      // ── 2. Rate-limit: enforce minimum gap between requests ─────────────
+      // Free tier = 20 RPM → need ≥ 3 s between calls.
+      const now  = Date.now();
+      const wait = MIN_REQUEST_GAP_MS - (now - lastRequestAt);
+      if (wait > 0) {
+        showStatus('loading', `⏱ Rate-limiting — waiting ${(wait/1000).toFixed(1)}s before next request…`);
+        await sleep(wait);
+      }
+      if (stopRequested) break;
+
+      // ── 3. Ask AI (with quota-exceeded retry) ────────────────────────────
+      lastRequestAt = Date.now();
       const { correctAnswer, correctAnswerIndex } = await callAIWithRetry(
         extracted.question,
         extracted.options,
@@ -142,6 +167,7 @@ async function runQuiz({ autoAdvance }) {
     showStatus('error', `❌ ${err.message}`);
     addLog(`Error: ${err.message}`, 'error');
   } finally {
+    isRunning = false;
     setRunning(false);
   }
 }
