@@ -16,7 +16,6 @@
         overflow: hidden;
       }
 
-      /* ── Header ── */
       .header {
         padding: 16px 18px 12px;
         background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
@@ -33,90 +32,78 @@
         display: flex; align-items: center; justify-content: center;
         font-size: 16px;
       }
-      .header-text h1 { font-size: 14px; font-weight: 700; color: #f1f5f9; letter-spacing: .3px; }
+      .header-text h1 { font-size: 14px; font-weight: 700; color: #f1f5f9; }
       .header-text p  { font-size: 11px; color: #64748b; margin-top: 1px; }
 
-      /* ── Main area ── */
       .main {
         flex: 1;
         display: flex;
         flex-direction: column;
-        gap: 12px;
-        padding: 16px;
+        gap: 10px;
+        padding: 14px;
         overflow-y: auto;
       }
 
-      /* ── Auto-answer card ── */
-      .auto-card {
-        background: linear-gradient(135deg, rgba(99,102,241,.12) 0%, rgba(139,92,246,.08) 100%);
-        border: 1px solid rgba(99,102,241,.3);
+      .card {
+        background: linear-gradient(135deg, rgba(99,102,241,.1) 0%, rgba(139,92,246,.07) 100%);
+        border: 1px solid rgba(99,102,241,.28);
         border-radius: 14px;
-        padding: 16px;
+        padding: 14px;
       }
-      .auto-card h2 {
-        font-size: 13px;
-        font-weight: 700;
-        color: #a5b4fc;
-        margin-bottom: 6px;
-        display: flex; align-items: center; gap: 6px;
+      .card h2 {
+        font-size: 12px; font-weight: 700; color: #a5b4fc;
+        margin-bottom: 5px; display: flex; align-items: center; gap: 5px;
       }
-      .auto-card p {
-        font-size: 12px;
-        color: #64748b;
-        line-height: 1.5;
-        margin-bottom: 14px;
-      }
+      .card p { font-size: 11px; color: #64748b; line-height: 1.45; margin-bottom: 12px; }
 
-      /* ── Buttons ── */
       .btn-primary {
-        width: 100%;
-        padding: 11px 16px;
+        width: 100%; padding: 11px 14px;
         background: linear-gradient(135deg, #6366f1, #8b5cf6);
-        border: none;
-        border-radius: 10px;
-        color: #fff;
-        font-size: 13px;
-        font-weight: 600;
-        cursor: pointer;
+        border: none; border-radius: 10px; color: #fff;
+        font-size: 13px; font-weight: 600; cursor: pointer;
         transition: opacity .15s, transform .1s;
         display: flex; align-items: center; justify-content: center; gap: 7px;
+        margin-bottom: 7px;
       }
       .btn-primary:hover  { opacity: .9; }
       .btn-primary:active { transform: scale(.98); }
-      .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+      .btn-primary:disabled { opacity: .35; cursor: not-allowed; }
 
       .btn-secondary {
-        width: 100%;
-        padding: 10px 16px;
+        width: 100%; padding: 9px 14px;
         background: rgba(255,255,255,.04);
         border: 1px solid rgba(255,255,255,.1);
-        border-radius: 10px;
-        color: #94a3b8;
-        font-size: 12px;
-        font-weight: 500;
-        cursor: pointer;
+        border-radius: 10px; color: #94a3b8;
+        font-size: 12px; font-weight: 500; cursor: pointer;
         transition: background .15s;
-        display: flex; align-items: center; justify-content: center; gap: 7px;
-        margin-top: 8px;
+        display: flex; align-items: center; justify-content: center; gap: 6px;
       }
       .btn-secondary:hover { background: rgba(255,255,255,.08); }
+      .btn-secondary:disabled { opacity: .35; cursor: not-allowed; }
 
-      /* ── Status / result ── */
-      #status-area {
-        margin-top: 4px;
+      .btn-danger {
+        width: 100%; padding: 9px 14px;
+        background: rgba(239,68,68,.12);
+        border: 1px solid rgba(239,68,68,.3);
+        border-radius: 10px; color: #fca5a5;
+        font-size: 12px; font-weight: 500; cursor: pointer;
+        transition: background .15s;
+        display: flex; align-items: center; justify-content: center; gap: 6px;
+        margin-top: 6px;
         display: none;
       }
+      .btn-danger:hover { background: rgba(239,68,68,.2); }
+
+      #status-area { display: none; }
       .status-box {
-        border-radius: 10px;
-        padding: 12px 14px;
-        font-size: 12px;
-        line-height: 1.55;
+        border-radius: 10px; padding: 11px 13px;
+        font-size: 11.5px; line-height: 1.6;
       }
       .status-box.loading {
         background: rgba(99,102,241,.1);
         border: 1px solid rgba(99,102,241,.25);
         color: #a5b4fc;
-        display: flex; align-items: center; gap: 8px;
+        display: flex; align-items: flex-start; gap: 8px;
       }
       .status-box.success {
         background: rgba(34,197,94,.08);
@@ -128,41 +115,67 @@
         border: 1px solid rgba(239,68,68,.25);
         color: #fca5a5;
       }
-      .answer-label { font-size: 11px; color: #64748b; margin-bottom: 3px; }
-      .answer-text  { font-size: 13px; font-weight: 600; color: #f1f5f9; }
-      .answer-index { display: inline-block; background: rgba(99,102,241,.25); color: #a5b4fc; border-radius: 4px; padding: 1px 7px; font-size: 11px; font-weight: 700; margin-right: 6px; }
 
-      /* ── Spinner ── */
+      /* Progress bar */
+      .progress-wrap {
+        display: none;
+        margin-top: 4px;
+        background: rgba(255,255,255,.06);
+        border-radius: 6px; height: 6px; overflow: hidden;
+      }
+      .progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #6366f1, #8b5cf6);
+        border-radius: 6px;
+        transition: width .4s ease;
+        width: 0%;
+      }
+
+      .log-list {
+        margin-top: 8px;
+        max-height: 160px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .log-item {
+        font-size: 10.5px;
+        color: #64748b;
+        padding: 3px 6px;
+        border-radius: 5px;
+        background: rgba(255,255,255,.03);
+        line-height: 1.4;
+      }
+      .log-item.done  { color: #86efac; }
+      .log-item.error { color: #fca5a5; }
+      .log-item.active { color: #a5b4fc; background: rgba(99,102,241,.1); }
+
+      .answer-label { font-size: 10px; color: #64748b; margin-bottom: 2px; }
+      .answer-text  { font-size: 12px; font-weight: 600; color: #f1f5f9; }
+      .answer-index {
+        display: inline-block; background: rgba(99,102,241,.25);
+        color: #a5b4fc; border-radius: 4px; padding: 1px 6px;
+        font-size: 10px; font-weight: 700; margin-right: 5px;
+      }
+
       .spinner {
-        width: 14px; height: 14px;
+        width: 13px; height: 13px; flex-shrink: 0;
         border: 2px solid rgba(165,180,252,.3);
         border-top-color: #a5b4fc;
         border-radius: 50%;
         animation: spin .7s linear infinite;
-        flex-shrink: 0;
       }
       @keyframes spin { to { transform: rotate(360deg); } }
 
-      /* ── Divider ── */
-      .divider {
-        height: 1px;
-        background: rgba(255,255,255,.06);
-        border-radius: 1px;
-      }
+      .divider { height: 1px; background: rgba(255,255,255,.06); }
 
-      /* ── Full-app link ── */
-      .open-app-row {
-        display: flex; align-items: center; justify-content: center; gap: 6px;
-        padding: 10px;
-        color: #475569;
-        font-size: 11px;
+      .footer {
+        display: flex; align-items: center; justify-content: center;
+        padding: 9px; color: #475569; font-size: 11px;
       }
-      .open-app-row a {
-        color: #6366f1;
-        text-decoration: none;
-        font-weight: 500;
-      }
-      .open-app-row a:hover { text-decoration: underline; }
+      .footer a { color: #6366f1; text-decoration: none; font-weight: 500; }
+      .footer a:hover { text-decoration: underline; }
     </style>
   </head>
   <body>
@@ -175,27 +188,36 @@
     </div>
 
     <div class="main">
-      <div class="auto-card">
-        <h2>⚡ Auto-Answer on Page</h2>
-        <p>AI reads the current question and clicks the correct answer directly on the page for you.</p>
+      <div class="card">
+        <h2>⚡ Auto-Complete Quiz</h2>
+        <p>AI answers every question and automatically advances through the quiz until it hits Submit.</p>
 
-        <button class="btn-primary" id="btn-auto-answer">
-          <span>🎯</span> Answer This Question
+        <button class="btn-primary" id="btn-full-quiz">
+          <span>🚀</span> Auto-Complete Entire Quiz
         </button>
 
-        <button class="btn-secondary" id="btn-full-app">
-          <span>📋</span> Open Full Analyzer
+        <button class="btn-secondary" id="btn-one-question">
+          <span>🎯</span> Answer This Question Only
         </button>
+
+        <button class="btn-danger" id="btn-stop">
+          ⛔ Stop
+        </button>
+      </div>
+
+      <div class="progress-wrap" id="progress-wrap">
+        <div class="progress-bar" id="progress-bar"></div>
       </div>
 
       <div id="status-area">
         <div class="status-box" id="status-box"></div>
+        <div class="log-list" id="log-list"></div>
       </div>
 
       <div class="divider"></div>
     </div>
 
-    <div class="open-app-row">
+    <div class="footer">
       <a href="https://quiz-ai-kappa.vercel.app" target="_blank">Open full app ↗</a>
     </div>
 

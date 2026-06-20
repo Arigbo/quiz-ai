@@ -1,285 +1,302 @@
 // QuizSolver AI PRO — Side Panel Logic
-// Flow: Extract question → Call AI API → Click correct button on page → Show toast on page
+// Flow: Extract → AI answer → Click answer → Click Next/Submit → repeat
 
 const API_BASE = 'https://quiz-ai-kappa.vercel.app';
 
-// ─── UI refs ─────────────────────────────────────────────────────────────────
-const btnAutoAnswer = document.getElementById('btn-auto-answer');
-const btnFullApp    = document.getElementById('btn-full-app');
-const statusArea    = document.getElementById('status-area');
-const statusBox     = document.getElementById('status-box');
+// ─── UI refs ──────────────────────────────────────────────────────────────────
+const btnFullQuiz    = document.getElementById('btn-full-quiz');
+const btnOneQuestion = document.getElementById('btn-one-question');
+const btnStop        = document.getElementById('btn-stop');
+const statusArea     = document.getElementById('status-area');
+const statusBox      = document.getElementById('status-box');
+const logList        = document.getElementById('log-list');
+const progressWrap   = document.getElementById('progress-wrap');
+const progressBar    = document.getElementById('progress-bar');
 
-btnFullApp.addEventListener('click', () => {
-  chrome.tabs.create({ url: API_BASE });
+let stopRequested = false;
+
+// ─── Button handlers ──────────────────────────────────────────────────────────
+btnFullQuiz.addEventListener('click', () => runQuiz({ autoAdvance: true }));
+btnOneQuestion.addEventListener('click', () => runQuiz({ autoAdvance: false }));
+btnStop.addEventListener('click', () => {
+  stopRequested = true;
+  showStatus('error', '⛔ Stopping after current question…');
 });
 
-// ─── Main: Answer on page ─────────────────────────────────────────────────────
-btnAutoAnswer.addEventListener('click', async () => {
-  setLoading(true);
-  showStatus('loading', 'Reading question from page…');
+// ─── Main orchestrator ────────────────────────────────────────────────────────
+async function runQuiz({ autoAdvance }) {
+  stopRequested = false;
+  setRunning(true);
+  clearLog();
+  showStatus('loading', autoAdvance ? 'Starting auto-complete…' : 'Reading question…');
+
+  let questionNumber = 0;
+  let totalQuestions = 0;
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-    // 1. Extract question + options from the active tab
-    const extractResults = await chrome.scripting.executeScript({
+    // Get the total question count from the page once
+    const countResult = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: extractSkillsBridgeQuestion,
+      func: () => {
+        // QuizNavigation shows "X of Y answered" — Y is totalQuestions
+        // Also the jump buttons grid has one button per question
+        const jumpBtns = document.querySelectorAll(
+          '[class*="grid"] button[type="button"][class*="rounded-lg"][class*="font-semibold"]'
+        );
+        return jumpBtns.length || null;
+      }
     });
+    totalQuestions = countResult[0]?.result || 0;
 
-    const extracted = extractResults[0]?.result;
-    console.log('[QuizAI] extracted:', JSON.stringify(extracted));
+    while (true) {
+      if (stopRequested) break;
 
-    if (!extracted || !extracted.question) {
-      showStatus('error', '❌ No quiz question found on this page. Make sure you\'re on a SkillsBridge quiz question and the question is visible.');
-      setLoading(false);
-      return;
+      questionNumber++;
+      showStatus('loading', `Question ${questionNumber}${totalQuestions ? ' of ' + totalQuestions : ''}…`);
+      if (totalQuestions > 0) {
+        setProgress(questionNumber, totalQuestions);
+      }
+
+      // ── 1. Extract question + options from page ──────────────────────────
+      const extractResult = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: extractQuestion,
+      });
+
+      const extracted = extractResult[0]?.result;
+
+      if (!extracted || !extracted.question) {
+        addLog(`Q${questionNumber}: ❌ No question found`, 'error');
+        showStatus('error', '❌ No quiz question found on this page.');
+        break;
+      }
+
+      if (!extracted.options || extracted.options.length === 0) {
+        addLog(`Q${questionNumber}: ⚠️ No options (${extracted.debug})`, 'error');
+        showStatus('error', `❌ Could not extract answer options.\n\nDebug: ${extracted.debug}`);
+        break;
+      }
+
+      // ── 2. Ask AI ────────────────────────────────────────────────────────
+      const res = await fetch(`${API_BASE}/api/auto-answer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: extracted.question, options: extracted.options }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `API error ${res.status}`);
+      }
+
+      const { correctAnswer, correctAnswerIndex } = await res.json();
+
+      if (correctAnswerIndex < 0 || correctAnswerIndex >= extracted.options.length) {
+        addLog(`Q${questionNumber}: ⚠️ Bad AI index ${correctAnswerIndex}`, 'error');
+        throw new Error(`AI returned invalid index ${correctAnswerIndex}. Answer: "${correctAnswer}"`);
+      }
+
+      const optLetter = String.fromCharCode(65 + correctAnswerIndex);
+      addLog(`Q${questionNumber}: ${optLetter}. ${correctAnswer.slice(0, 45)}${correctAnswer.length > 45 ? '…' : ''}`, 'done');
+
+      // ── 3. Click answer on page ──────────────────────────────────────────
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: clickAnswer,
+        args: [correctAnswerIndex, correctAnswer, optLetter],
+      });
+
+      // Wait for React to register the selection
+      await sleep(600);
+
+      if (!autoAdvance) {
+        showStatus('success', `
+          <div class="answer-label">✅ Answered:</div>
+          <div class="answer-text"><span class="answer-index">${optLetter}</span>${correctAnswer}</div>
+        `);
+        break;
+      }
+
+      if (stopRequested) break;
+
+      // ── 4. Click Next or Submit ──────────────────────────────────────────
+      const navResult = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: clickNextOrSubmit,
+      });
+
+      const navAction = navResult[0]?.result;
+
+      if (navAction === 'submitted') {
+        setProgress(totalQuestions || questionNumber, totalQuestions || questionNumber);
+        showStatus('success', `🎉 Quiz submitted! Answered ${questionNumber} question${questionNumber !== 1 ? 's' : ''}.`);
+        addLog('✅ Submitted!', 'done');
+        break;
+      }
+
+      if (navAction === 'not_found') {
+        showStatus('error', '⚠️ Could not find Next/Submit button.');
+        break;
+      }
+
+      // navAction === 'next' — wait for React to render the next question
+      await waitForQuestionChange(tab.id, extracted.question);
     }
-
-    if (!extracted.options || extracted.options.length === 0) {
-      showStatus('error', `❌ Found question but couldn't extract answer options.\n\nQ: "${extracted.question.slice(0, 80)}"\n\nDebug: ${extracted.debug || 'n/a'}`);
-      setLoading(false);
-      return;
-    }
-
-    showStatus('loading', `Found: "${extracted.question.slice(0, 55)}…"\n\nOptions: ${extracted.options.map((o, i) => `${String.fromCharCode(65+i)}. ${o.slice(0,30)}`).join(' | ')}\n\nAsking AI…`);
-
-    // 2. Call the AI API
-    const res = await fetch(`${API_BASE}/api/auto-answer`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        question: extracted.question,
-        options:  extracted.options,
-      }),
-    });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error || `API error ${res.status}`);
-    }
-
-    const { correctAnswer, correctAnswerIndex } = await res.json();
-
-    if (correctAnswerIndex < 0 || correctAnswerIndex >= extracted.options.length) {
-      throw new Error(`AI returned invalid index ${correctAnswerIndex}. Answer: "${correctAnswer}"`);
-    }
-
-    const optionLetter = String.fromCharCode(65 + correctAnswerIndex);
-
-    showStatus('success', `
-      <div class="answer-label">✅ AI selected answer ${optionLetter}:</div>
-      <div class="answer-text"><span class="answer-index">${optionLetter}</span>${correctAnswer}</div>
-    `);
-
-    // 3. Click the correct answer button on the page + show toast
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: clickAnswerOnPage,
-      args: [correctAnswerIndex, correctAnswer, optionLetter],
-    });
 
   } catch (err) {
     showStatus('error', `❌ ${err.message}`);
+    addLog(`Error: ${err.message}`, 'error');
   } finally {
-    setLoading(false);
+    setRunning(false);
   }
-});
+}
 
-// ─── Injected into the quiz tab: extract question & options ───────────────────
-/**
- * Runs INSIDE the SkillsBridge tab.
- *
- * QuizQuestionCard.tsx DOM structure (Tailwind classes are written verbatim):
- *
- * <Card class="mt-5 gap-0 border-border bg-white py-0 shadow-sm">
- *   <CardContent class="px-4 py-5 sm:px-8 sm:py-8">
- *     <div class="mb-6 flex items-start gap-3 sm:mb-7">
- *       <span class="...bg-sb-primary/10...">1</span>          ← question number
- *       <div class="min-w-0">
- *         <p class="pt-1 text-base font-medium leading-snug text-foreground ...">
- *           QUESTION TEXT                                        ← target
- *         </p>
- *         <p class="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
- *           multiple choice                                      ← type label (skip)
- *         </p>
- *       </div>
- *     </div>
- *     <!-- Multiple-choice answers -->
- *     <div class="space-y-3">
- *       <button type="button" class="w-full overflow-hidden rounded-lg border text-left ...">
- *         <div class="flex items-center">
- *           <div class="flex h-12 w-14 ...">                    ← label col
- *             <span class="...">...</span>                      ← radio dot
- *             <span class="text-sm font-semibold text-muted-foreground">A:</span>
- *           </div>
- *           <div class="px-3 py-3 text-sm text-foreground ...">
- *             ANSWER TEXT                                       ← target
- *           </div>
- *         </div>
- *       </button>
- *       ...
- *     </div>
- *   </CardContent>
- * </Card>
- */
-function extractSkillsBridgeQuestion() {
+// ─── Wait for the question text to change (next question loaded) ───────────────
+async function waitForQuestionChange(tabId, previousQuestion) {
+  const maxWait = 6000; // 6 seconds max
+  const interval = 250;
+  let elapsed = 0;
+
+  while (elapsed < maxWait) {
+    await sleep(interval);
+    elapsed += interval;
+
+    const result = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (prev) => {
+        const paras = Array.from(
+          document.querySelectorAll('p[class*="font-medium"][class*="leading-snug"]')
+        ).filter(p => (p.textContent?.trim().length ?? 0) > 10);
+        const current = paras[0]?.textContent?.trim() ?? '';
+        return current !== prev && current.length > 5;
+      },
+      args: [previousQuestion],
+    });
+
+    if (result[0]?.result === true) return; // question changed — ready
+  }
+  // Timed out — continue anyway
+}
+
+// ─── Injected: extract current question + options ─────────────────────────────
+function extractQuestion() {
   const debug = [];
 
-  // ── 1. Find the question text ────────────────────────────────────────────────
-  // The question <p> has: pt-1 text-base font-medium leading-snug text-foreground
-  // The type-label <p> has: mt-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400
-  // → distinguish by: question text is NOT uppercase, is longer, has leading-snug
-
-  let questionText = '';
+  // Find question paragraph (font-medium + leading-snug, not uppercase label)
   let questionEl = null;
 
-  // Prefer paragraphs that have BOTH font-medium AND leading-snug
-  const strictMatch = Array.from(
+  const strictMatches = Array.from(
     document.querySelectorAll('p[class*="font-medium"][class*="leading-snug"]')
-  ).filter(p => {
-    const t = p.textContent?.trim() ?? '';
-    return t.length > 10;
-  });
+  ).filter(p => (p.textContent?.trim().length ?? 0) > 10);
 
-  if (strictMatch.length > 0) {
-    questionEl = strictMatch[0];
-    debug.push(`found via strict selector, count=${strictMatch.length}`);
+  if (strictMatches.length > 0) {
+    questionEl = strictMatches[0];
+    debug.push(`strict:${strictMatches.length}`);
   } else {
-    // Fallback: any font-medium <p> that is not all-uppercase (the type label is uppercase)
-    const loose = Array.from(
-      document.querySelectorAll('p[class*="font-medium"]')
-    ).filter(p => {
+    const loose = Array.from(document.querySelectorAll('p[class*="font-medium"]')).filter(p => {
       const t = p.textContent?.trim() ?? '';
       const cls = p.className ?? '';
-      // Exclude the type-label <p> which has "uppercase" class
       return t.length > 10 && !cls.includes('uppercase') && t !== t.toUpperCase();
     });
-    if (loose.length > 0) {
-      questionEl = loose[0];
-      debug.push(`found via loose selector, count=${loose.length}`);
-    }
+    if (loose.length > 0) { questionEl = loose[0]; debug.push(`loose:${loose.length}`); }
   }
 
-  if (!questionEl) {
-    debug.push('no question <p> found');
-    return { question: null, options: [], debug: debug.join(' | ') };
-  }
+  if (!questionEl) return { question: null, options: [], debug: 'no-question-el' };
 
-  questionText = questionEl.textContent?.trim() ?? '';
-  debug.push(`question="${questionText.slice(0, 40)}"`);
+  const questionText = questionEl.textContent?.trim() ?? '';
 
-  // ── 2. Find answer buttons ────────────────────────────────────────────────────
-  // Strategy A: walk UP from the question <p> until we reach an ancestor that
-  //             contains button[type="button"] elements, then collect them.
-  //             Stop before <body> to avoid grabbing nav buttons from the whole page.
-
-  let answerButtons = [];
+  // Walk up to find a container with answer buttons
+  let answerContainer = null;
   let node = questionEl;
-
-  for (let depth = 0; depth < 15; depth++) {
+  for (let d = 0; d < 15; d++) {
     node = node.parentElement;
     if (!node || node === document.body) break;
-
-    const btns = Array.from(node.querySelectorAll('button[type="button"]'));
+    const btns = Array.from(node.querySelectorAll('button[type="button"]')).filter(b => {
+      const cls = b.className ?? '';
+      // Exclude the Next/Submit/Previous/jump buttons which have bg-sb-primary or min-w-32
+      return !cls.includes('bg-sb-primary') && !cls.includes('min-w-32') && !cls.includes('min-w-[');
+    });
     if (btns.length >= 2) {
-      answerButtons = btns;
-      debug.push(`buttons found at depth=${depth}, count=${btns.length}`);
+      answerContainer = { el: node, btns };
+      debug.push(`container@depth=${d},btns=${btns.length}`);
       break;
     }
-  }
-
-  // Strategy B: if walk-up failed, look for the nearest sibling <div class="space-y-3">
-  // (the answer container in QuizQuestionCard) relative to the question's grandparent
-  if (answerButtons.length === 0) {
-    const headerRow = questionEl.closest('[class*="gap-3"]') ?? questionEl.parentElement?.parentElement;
-    if (headerRow) {
-      const sibling = headerRow.nextElementSibling;
-      if (sibling) {
-        const btns = Array.from(sibling.querySelectorAll('button[type="button"]'));
-        if (btns.length >= 1) {
-          answerButtons = btns;
-          debug.push(`buttons from sibling, count=${btns.length}`);
+    // Also try the next sibling of the question header row (space-y-3 answers div)
+    if (d === 2 || d === 3) {
+      const headerRow = questionEl.closest('[class*="gap-3"]') ?? questionEl.parentElement?.parentElement;
+      if (headerRow?.nextElementSibling) {
+        const sibBtns = Array.from(headerRow.nextElementSibling.querySelectorAll('button[type="button"]'));
+        if (sibBtns.length >= 1) {
+          answerContainer = { el: headerRow.nextElementSibling, btns: sibBtns };
+          debug.push(`sibling,btns=${sibBtns.length}`);
+          break;
         }
       }
     }
   }
 
-  // Strategy C: last resort — ALL buttons on page except known nav labels
-  if (answerButtons.length === 0) {
-    const NAV = new Set(['next', 'previous', 'prev', 'submit', 'back', 'finish', 'save', 'cancel', 'skip', 'continue']);
-    answerButtons = Array.from(document.querySelectorAll('button[type="button"]')).filter(btn => {
+  // Last resort: ALL page buttons that are NOT nav/jump buttons
+  if (!answerContainer) {
+    const NAV = new Set(['next', 'previous', 'prev', 'submit assessment', 'submit', 'back', 'finish', 'save', 'cancel', 'skip', 'continue']);
+    const allBtns = Array.from(document.querySelectorAll('button[type="button"]')).filter(btn => {
       const t = (btn.textContent ?? '').trim().toLowerCase();
-      return t.length > 1 && !NAV.has(t) && t.length < 300;
+      const cls = btn.className ?? '';
+      return t.length > 1 && !NAV.has(t) && t.length < 300
+             && !cls.includes('bg-sb-primary') && !cls.includes('min-w-32')
+             && !/^\d+$/.test(t); // exclude jump buttons (numbered)
     });
-    debug.push(`strategy C, all-page buttons filtered, count=${answerButtons.length}`);
+    answerContainer = { el: document.body, btns: allBtns };
+    debug.push(`fallback,btns=${allBtns.length}`);
   }
 
-  // ── 3. Extract text from each answer button ───────────────────────────────────
   const options = [];
-
-  for (const btn of answerButtons) {
+  for (const btn of answerContainer.btns) {
     let text = '';
 
-    // Method 1: The answer text is in <div class="px-3 py-3 ..."> — second div child
-    //           inside <div class="flex items-center">
-    //           We look for the div that has px-3 AND py-3 in its class list.
-    const answerDiv =
-      btn.querySelector('div[class*="px-3"][class*="py-3"]') ??
-      btn.querySelector('div[class*="text-foreground"]:not([class*="muted"])');
+    // Method 1: answer text div (px-3 py-3)
+    const answerDiv = btn.querySelector('div[class*="px-3"][class*="py-3"]')
+      ?? btn.querySelector('div[class*="text-foreground"]:not([class*="muted"])');
+    if (answerDiv) text = answerDiv.textContent?.trim() ?? '';
 
-    if (answerDiv) {
-      text = answerDiv.textContent?.trim() ?? '';
-    }
-
-    // Method 2: For True/False — the button has <p class="...font-semibold...">True</p>
+    // Method 2: True/False font-semibold <p>
     if (!text) {
       const pTag = btn.querySelector('p[class*="font-semibold"]');
       if (pTag) text = pTag.textContent?.trim() ?? '';
     }
 
-    // Method 3: Strip the "A:" / "B:" label prefix from the full button innerText.
-    //           innerText for a typical answer button:  "A:\nAnswer text here"
+    // Method 3: strip option label from innerText ("A:\nAnswer text")
     if (!text) {
       const raw = btn.innerText?.trim() ?? '';
-      // Remove leading option label line (e.g. "A:\n" or "A: ")
       const stripped = raw.replace(/^[A-Z]:\s*/m, '').trim();
-      // Take only the first paragraph of text (ignore any nested noise)
       text = stripped.split('\n').map(l => l.trim()).filter(Boolean).join(' ');
     }
 
-    if (text && text.length > 1) {
-      options.push(text);
-    }
+    if (text && text.length > 1) options.push(text);
   }
 
-  debug.push(`options extracted: ${options.length}`);
-
-  return {
-    question: questionText,
-    options,
-    debug: debug.join(' | '),
-  };
+  debug.push(`opts:${options.length}`);
+  return { question: questionText, options, debug: debug.join('|') };
 }
 
-// ─── Injected into the quiz tab: click the answer button + show toast ─────────
-function clickAnswerOnPage(correctIndex, correctAnswer, optionLetter) {
-  // ── Inject styles once ────────────────────────────────────────────────────
+// ─── Injected: click the correct answer button ────────────────────────────────
+function clickAnswer(correctIndex, correctAnswer, optionLetter) {
+  // Inject styles once
   if (!document.getElementById('quiz-ai-styles')) {
-    const style = document.createElement('style');
-    style.id = 'quiz-ai-styles';
-    style.textContent = `
+    const s = document.createElement('style');
+    s.id = 'quiz-ai-styles';
+    s.textContent = `
       @keyframes quizAiSlideIn {
-        from { opacity: 0; transform: translateY(16px) scale(.95); }
-        to   { opacity: 1; transform: translateY(0) scale(1); }
+        from { opacity:0; transform:translateY(14px) scale(.95); }
+        to   { opacity:1; transform:translateY(0) scale(1); }
       }
     `;
-    document.head.appendChild(style);
+    document.head.appendChild(s);
   }
 
-  // ── Re-discover answer buttons fresh (avoid stale refs) ───────────────────
-  function findAnswerButtons() {
-    // Strategy 1: walk up from question paragraph
+  // Find answer buttons (same logic, excluding nav)
+  function findAnswerBtns() {
     const qParas = Array.from(
       document.querySelectorAll('p[class*="font-medium"][class*="leading-snug"]')
     ).filter(p => (p.textContent?.trim().length ?? 0) > 10);
@@ -289,110 +306,146 @@ function clickAnswerOnPage(correctIndex, correctAnswer, optionLetter) {
       for (let d = 0; d < 15; d++) {
         node = node.parentElement;
         if (!node || node === document.body) break;
-        const btns = Array.from(node.querySelectorAll('button[type="button"]'));
+        const btns = Array.from(node.querySelectorAll('button[type="button"]')).filter(b => {
+          const cls = b.className ?? '';
+          return !cls.includes('bg-sb-primary') && !cls.includes('min-w-32');
+        });
         if (btns.length >= 2) return btns;
       }
-      // Strategy 2: sibling of question header row
-      const headerRow = qParas[0].closest('[class*="gap-3"]') ?? qParas[0].parentElement?.parentElement;
-      if (headerRow?.nextElementSibling) {
-        const btns = Array.from(headerRow.nextElementSibling.querySelectorAll('button[type="button"]'));
-        if (btns.length >= 1) return btns;
+      const hr = qParas[0].closest('[class*="gap-3"]') ?? qParas[0].parentElement?.parentElement;
+      if (hr?.nextElementSibling) {
+        const bs = Array.from(hr.nextElementSibling.querySelectorAll('button[type="button"]'));
+        if (bs.length >= 1) return bs;
       }
     }
 
-    // Strategy 3: all page buttons minus nav
-    const NAV = new Set(['next','previous','prev','submit','back','finish','save','cancel','skip','continue']);
-    return Array.from(document.querySelectorAll('button[type="button"]')).filter(btn => {
-      const t = (btn.textContent ?? '').trim().toLowerCase();
-      return t.length > 1 && !NAV.has(t) && t.length < 300;
+    const NAV = new Set(['next','previous','prev','submit assessment','submit','back','finish','save','cancel','skip','continue']);
+    return Array.from(document.querySelectorAll('button[type="button"]')).filter(b => {
+      const t = (b.textContent ?? '').trim().toLowerCase();
+      const cls = b.className ?? '';
+      return t.length > 1 && !NAV.has(t) && t.length < 300
+             && !cls.includes('bg-sb-primary') && !cls.includes('min-w-32')
+             && !/^\d+$/.test(t);
     });
   }
 
-  // ── React-safe click: dispatchEvent bubbles through React's event system ──
-  function reactClick(el) {
-    el.focus();
-    // MouseEvent with bubbles:true is required for React's synthetic event system
-    el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
-    el.dispatchEvent(new MouseEvent('mouseup',   { bubbles: true, cancelable: true, view: window }));
-    el.dispatchEvent(new MouseEvent('click',     { bubbles: true, cancelable: true, view: window }));
-  }
+  const btns = findAnswerBtns();
+  const target = btns[correctIndex] ?? null;
 
-  // ── Toast helper ──────────────────────────────────────────────────────────
-  function showToast(message, type) {
-    const existing = document.getElementById('quiz-ai-toast');
-    if (existing) existing.remove();
-    const toast = document.createElement('div');
-    toast.id = 'quiz-ai-toast';
-    toast.style.cssText = `
-      position:fixed; bottom:24px; right:24px; z-index:2147483647;
-      max-width:380px; padding:14px 18px; border-radius:12px;
-      font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;
-      font-size:13px; font-weight:500; line-height:1.5; color:#fff;
-      box-shadow:0 8px 32px rgba(0,0,0,.4);
-      animation:quizAiSlideIn .3s cubic-bezier(.34,1.56,.64,1);
+  // Show floating toast
+  function showToast(msg, type) {
+    const ex = document.getElementById('quiz-ai-toast');
+    if (ex) ex.remove();
+    const t = document.createElement('div');
+    t.id = 'quiz-ai-toast';
+    t.style.cssText = `
+      position:fixed;bottom:24px;right:24px;z-index:2147483647;
+      max-width:380px;padding:12px 16px;border-radius:10px;
+      font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;
+      font-size:12.5px;font-weight:500;line-height:1.5;color:#fff;
+      box-shadow:0 6px 24px rgba(0,0,0,.4);
+      animation:quizAiSlideIn .28s cubic-bezier(.34,1.56,.64,1);
       cursor:pointer;
       ${type === 'success'
-        ? 'background:linear-gradient(135deg,rgba(22,163,74,.97),rgba(5,150,105,.97));border:1px solid rgba(34,197,94,.4);'
-        : 'background:linear-gradient(135deg,rgba(217,119,6,.97),rgba(180,83,9,.97));border:1px solid rgba(251,191,36,.4);'}
+        ? 'background:linear-gradient(135deg,rgba(22,163,74,.97),rgba(5,150,105,.97));border:1px solid rgba(34,197,94,.35);'
+        : 'background:linear-gradient(135deg,rgba(217,119,6,.97),rgba(180,83,9,.97));border:1px solid rgba(251,191,36,.35);'}
     `;
-    toast.textContent = message;
-    toast.title = 'Click to dismiss';
-    toast.addEventListener('click', () => toast.remove());
-    document.body.appendChild(toast);
-    setTimeout(() => toast?.remove(), 7000);
+    t.textContent = msg;
+    t.addEventListener('click', () => t.remove());
+    document.body.appendChild(t);
+    setTimeout(() => t?.remove(), 5000);
   }
 
-  // ── Main: find, scroll, click ─────────────────────────────────────────────
-  const answerButtons = findAnswerButtons();
-  const target = answerButtons[correctIndex] ?? null;
-
   if (!target) {
-    showToast(`⚠️ Button not found. AI says: ${optionLetter}. ${correctAnswer} — click manually`, 'warn');
+    showToast(`⚠️ ${optionLetter}. ${correctAnswer} — click manually`, 'warn');
     return;
   }
 
-  // Scroll into view, wait for scroll to settle, then click
   target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
   setTimeout(() => {
-    // Re-find the button right before clicking in case React re-rendered
-    const freshButtons = findAnswerButtons();
-    const freshTarget = freshButtons[correctIndex] ?? target;
-
-    // Highlight the button so user can see what's being selected
-    const origOutline = freshTarget.style.outline;
-    const origTransition = freshTarget.style.transition;
-    freshTarget.style.transition = 'outline 0.1s';
-    freshTarget.style.outline = '3px solid #6366f1';
-
-    // React-safe click
-    reactClick(freshTarget);
-
-    // Remove highlight after a moment
-    setTimeout(() => {
-      freshTarget.style.outline = origOutline;
-      freshTarget.style.transition = origTransition;
-    }, 1500);
-
-    showToast(`✅ Answered: ${optionLetter}. ${correctAnswer}`, 'success');
-  }, 400);
+    // Re-find fresh in case React re-rendered
+    const fresh = findAnswerBtns()[correctIndex] ?? target;
+    // React-safe click: dispatch mousedown + mouseup + click with bubbles
+    fresh.focus();
+    ['mousedown','mouseup','click'].forEach(type => {
+      fresh.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    });
+    // Highlight
+    fresh.style.outline = '3px solid #6366f1';
+    setTimeout(() => { fresh.style.outline = ''; }, 1400);
+    showToast(`✅ ${optionLetter}. ${correctAnswer}`, 'success');
+  }, 350);
 }
 
-// ─── Status helpers ───────────────────────────────────────────────────────────
-function showStatus(type, text) {
+// ─── Injected: click Next or Submit Assessment ────────────────────────────────
+function clickNextOrSubmit() {
+  // QuizNavigation renders:
+  //   <Button class="...bg-sb-primary text-white hover:bg-sb-dark min-w-32...">
+  //     "Next" (with ChevronRight)  OR  "Submit Assessment"
+  //   </Button>
+
+  // Find all buttons that have bg-sb-primary (the Next/Submit button)
+  // Exclude numbered jump buttons (they also have bg-sb-primary when current)
+  const candidates = Array.from(document.querySelectorAll('button')).filter(btn => {
+    const cls = btn.className ?? '';
+    const t = (btn.textContent ?? '').trim().toLowerCase();
+    return cls.includes('bg-sb-primary') &&
+           (cls.includes('min-w-32') || t.includes('next') || t.includes('submit'));
+  });
+
+  if (candidates.length === 0) return 'not_found';
+
+  const navBtn = candidates[0];
+  const isSubmit = navBtn.textContent?.toLowerCase().includes('submit');
+
+  navBtn.focus();
+  ['mousedown','mouseup','click'].forEach(type => {
+    navBtn.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+  });
+
+  return isSubmit ? 'submitted' : 'next';
+}
+
+// ─── Helper: sleep ────────────────────────────────────────────────────────────
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// ─── UI helpers ───────────────────────────────────────────────────────────────
+function showStatus(type, html) {
   statusArea.style.display = 'block';
   statusBox.className = `status-box ${type}`;
-
   if (type === 'loading') {
-    statusBox.innerHTML = `<div class="spinner"></div><span style="white-space:pre-wrap">${text}</span>`;
+    statusBox.innerHTML = `<div class="spinner"></div><span style="white-space:pre-wrap">${html}</span>`;
   } else {
-    statusBox.innerHTML = text;
+    statusBox.innerHTML = html;
   }
 }
 
-function setLoading(loading) {
-  btnAutoAnswer.disabled = loading;
-  btnAutoAnswer.innerHTML = loading
-    ? '<div class="spinner" style="border-color:rgba(255,255,255,.3);border-top-color:#fff"></div> Working…'
-    : '<span>🎯</span> Answer This Question';
+function addLog(text, cls) {
+  const item = document.createElement('div');
+  item.className = `log-item ${cls || ''}`;
+  item.textContent = text;
+  logList.appendChild(item);
+  logList.scrollTop = logList.scrollHeight;
+}
+
+function clearLog() {
+  logList.innerHTML = '';
+}
+
+function setProgress(current, total) {
+  if (!total) return;
+  progressWrap.style.display = 'block';
+  progressBar.style.width = `${Math.min(100, (current / total) * 100)}%`;
+}
+
+function setRunning(running) {
+  btnFullQuiz.disabled    = running;
+  btnOneQuestion.disabled = running;
+  btnStop.style.display   = running ? 'flex' : 'none';
+  if (!running) {
+    progressWrap.style.display = 'none';
+    progressBar.style.width    = '0%';
+  }
 }
