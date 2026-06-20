@@ -19,22 +19,30 @@ btnAutoAnswer.addEventListener('click', async () => {
   showStatus('loading', 'Reading question from page…');
 
   try {
-    // 1. Extract question + options from the active tab
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+    // 1. Extract question + options from the active tab
     const extractResults = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: extractSkillsBridgeQuestion,
     });
 
     const extracted = extractResults[0]?.result;
+    console.log('[QuizAI] extracted:', JSON.stringify(extracted));
 
     if (!extracted || !extracted.question) {
-      showStatus('error', '❌ No quiz question found on this page. Make sure you\'re on a SkillsBridge quiz question.');
+      showStatus('error', '❌ No quiz question found on this page. Make sure you\'re on a SkillsBridge quiz question and the question is visible.');
       setLoading(false);
       return;
     }
 
-    showStatus('loading', `Found: "${extracted.question.slice(0, 60)}…"\n\nAsking AI…`);
+    if (!extracted.options || extracted.options.length === 0) {
+      showStatus('error', `❌ Found question but couldn't extract answer options.\n\nQ: "${extracted.question.slice(0, 80)}"\n\nDebug: ${extracted.debug || 'n/a'}`);
+      setLoading(false);
+      return;
+    }
+
+    showStatus('loading', `Found: "${extracted.question.slice(0, 55)}…"\n\nOptions: ${extracted.options.map((o, i) => `${String.fromCharCode(65+i)}. ${o.slice(0,30)}`).join(' | ')}\n\nAsking AI…`);
 
     // 2. Call the AI API
     const res = await fetch(`${API_BASE}/api/auto-answer`, {
@@ -42,7 +50,7 @@ btnAutoAnswer.addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         question: extracted.question,
-        options: extracted.options,
+        options:  extracted.options,
       }),
     });
 
@@ -52,14 +60,19 @@ btnAutoAnswer.addEventListener('click', async () => {
     }
 
     const { correctAnswer, correctAnswerIndex } = await res.json();
+
+    if (correctAnswerIndex < 0 || correctAnswerIndex >= extracted.options.length) {
+      throw new Error(`AI returned invalid index ${correctAnswerIndex}. Answer: "${correctAnswer}"`);
+    }
+
     const optionLetter = String.fromCharCode(65 + correctAnswerIndex);
 
     showStatus('success', `
-      <div class="answer-label">AI selected answer ${optionLetter}:</div>
+      <div class="answer-label">✅ AI selected answer ${optionLetter}:</div>
       <div class="answer-text"><span class="answer-index">${optionLetter}</span>${correctAnswer}</div>
     `);
 
-    // 3. Click the correct answer on the page + show a toast overlay
+    // 3. Click the correct answer button on the page + show toast
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: clickAnswerOnPage,
@@ -74,114 +87,254 @@ btnAutoAnswer.addEventListener('click', async () => {
 });
 
 // ─── Injected into the quiz tab: extract question & options ───────────────────
+/**
+ * Runs INSIDE the SkillsBridge tab.
+ *
+ * QuizQuestionCard.tsx DOM structure (Tailwind classes are written verbatim):
+ *
+ * <Card class="mt-5 gap-0 border-border bg-white py-0 shadow-sm">
+ *   <CardContent class="px-4 py-5 sm:px-8 sm:py-8">
+ *     <div class="mb-6 flex items-start gap-3 sm:mb-7">
+ *       <span class="...bg-sb-primary/10...">1</span>          ← question number
+ *       <div class="min-w-0">
+ *         <p class="pt-1 text-base font-medium leading-snug text-foreground ...">
+ *           QUESTION TEXT                                        ← target
+ *         </p>
+ *         <p class="mt-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400">
+ *           multiple choice                                      ← type label (skip)
+ *         </p>
+ *       </div>
+ *     </div>
+ *     <!-- Multiple-choice answers -->
+ *     <div class="space-y-3">
+ *       <button type="button" class="w-full overflow-hidden rounded-lg border text-left ...">
+ *         <div class="flex items-center">
+ *           <div class="flex h-12 w-14 ...">                    ← label col
+ *             <span class="...">...</span>                      ← radio dot
+ *             <span class="text-sm font-semibold text-muted-foreground">A:</span>
+ *           </div>
+ *           <div class="px-3 py-3 text-sm text-foreground ...">
+ *             ANSWER TEXT                                       ← target
+ *           </div>
+ *         </div>
+ *       </button>
+ *       ...
+ *     </div>
+ *   </CardContent>
+ * </Card>
+ */
 function extractSkillsBridgeQuestion() {
-  // Find question text: the <p> with font-medium leading-snug inside the question card
-  // QuizQuestionCard.tsx: <p class="pt-1 text-base font-medium leading-snug text-foreground ...">
+  const debug = [];
+
+  // ── 1. Find the question text ────────────────────────────────────────────────
+  // The question <p> has: pt-1 text-base font-medium leading-snug text-foreground
+  // The type-label <p> has: mt-2 text-xs font-medium uppercase tracking-[0.18em] text-slate-400
+  // → distinguish by: question text is NOT uppercase, is longer, has leading-snug
 
   let questionText = '';
-  let options = [];
+  let questionEl = null;
 
-  // Strategy 1: compound Tailwind classes
-  const questionParas = Array.from(
-    document.querySelectorAll('p[class*="font-medium"]')
+  // Prefer paragraphs that have BOTH font-medium AND leading-snug
+  const strictMatch = Array.from(
+    document.querySelectorAll('p[class*="font-medium"][class*="leading-snug"]')
   ).filter(p => {
     const t = p.textContent?.trim() ?? '';
-    return t.length > 10 && t !== t.toUpperCase();
+    return t.length > 10;
   });
 
-  if (questionParas.length === 0) return { question: null, options: [] };
+  if (strictMatch.length > 0) {
+    questionEl = strictMatch[0];
+    debug.push(`found via strict selector, count=${strictMatch.length}`);
+  } else {
+    // Fallback: any font-medium <p> that is not all-uppercase (the type label is uppercase)
+    const loose = Array.from(
+      document.querySelectorAll('p[class*="font-medium"]')
+    ).filter(p => {
+      const t = p.textContent?.trim() ?? '';
+      const cls = p.className ?? '';
+      // Exclude the type-label <p> which has "uppercase" class
+      return t.length > 10 && !cls.includes('uppercase') && t !== t.toUpperCase();
+    });
+    if (loose.length > 0) {
+      questionEl = loose[0];
+      debug.push(`found via loose selector, count=${loose.length}`);
+    }
+  }
 
-  const qPara = questionParas[0];
-  questionText = qPara.textContent?.trim() ?? '';
+  if (!questionEl) {
+    debug.push('no question <p> found');
+    return { question: null, options: [], debug: debug.join(' | ') };
+  }
 
-  // Walk up to find the CardContent (contains both question header + answer buttons)
-  let cardContent = null;
-  let node = qPara;
-  for (let i = 0; i < 12; i++) {
+  questionText = questionEl.textContent?.trim() ?? '';
+  debug.push(`question="${questionText.slice(0, 40)}"`);
+
+  // ── 2. Find answer buttons ────────────────────────────────────────────────────
+  // Strategy A: walk UP from the question <p> until we reach an ancestor that
+  //             contains button[type="button"] elements, then collect them.
+  //             Stop before <body> to avoid grabbing nav buttons from the whole page.
+
+  let answerButtons = [];
+  let node = questionEl;
+
+  for (let depth = 0; depth < 15; depth++) {
     node = node.parentElement;
-    if (!node) break;
-    const btns = node.querySelectorAll('button[type="button"]');
-    if (btns.length >= 1) {
-      cardContent = node;
+    if (!node || node === document.body) break;
+
+    const btns = Array.from(node.querySelectorAll('button[type="button"]'));
+    if (btns.length >= 2) {
+      answerButtons = btns;
+      debug.push(`buttons found at depth=${depth}, count=${btns.length}`);
       break;
     }
   }
 
-  if (!cardContent) {
-    return { question: questionText, options: [] };
-  }
-
-  const answerButtons = cardContent.querySelectorAll('button[type="button"]');
-
-  answerButtons.forEach(btn => {
-    // Structure: <button> → <div.flex.items-center> → [labelDiv, answerDiv]
-    const flexRow = btn.querySelector('div.flex.items-center') ?? btn.querySelector('div');
-    if (flexRow) {
-      const children = Array.from(flexRow.children).filter(el => el.tagName === 'DIV');
-      if (children.length >= 2) {
-        const text = children[children.length - 1].textContent?.trim() ?? '';
-        if (text.length > 0) { options.push(text); return; }
+  // Strategy B: if walk-up failed, look for the nearest sibling <div class="space-y-3">
+  // (the answer container in QuizQuestionCard) relative to the question's grandparent
+  if (answerButtons.length === 0) {
+    const headerRow = questionEl.closest('[class*="gap-3"]') ?? questionEl.parentElement?.parentElement;
+    if (headerRow) {
+      const sibling = headerRow.nextElementSibling;
+      if (sibling) {
+        const btns = Array.from(sibling.querySelectorAll('button[type="button"]'));
+        if (btns.length >= 1) {
+          answerButtons = btns;
+          debug.push(`buttons from sibling, count=${btns.length}`);
+        }
       }
     }
-    // Fallback for True/False — the <p class="font-semibold"> inside button
-    const pTag = btn.querySelector('p[class*="font-semibold"]');
-    if (pTag) { options.push(pTag.textContent?.trim() ?? ''); return; }
+  }
 
-    // Last resort: strip label prefix from button text
-    const raw = btn.innerText?.trim() ?? '';
-    const match = raw.match(/^[A-Z]:\s*([\s\S]+)$/m);
-    const text = match ? match[1].trim() : raw;
-    if (text.length > 1) options.push(text);
-  });
+  // Strategy C: last resort — ALL buttons on page except known nav labels
+  if (answerButtons.length === 0) {
+    const NAV = new Set(['next', 'previous', 'prev', 'submit', 'back', 'finish', 'save', 'cancel', 'skip', 'continue']);
+    answerButtons = Array.from(document.querySelectorAll('button[type="button"]')).filter(btn => {
+      const t = (btn.textContent ?? '').trim().toLowerCase();
+      return t.length > 1 && !NAV.has(t) && t.length < 300;
+    });
+    debug.push(`strategy C, all-page buttons filtered, count=${answerButtons.length}`);
+  }
 
-  return { question: questionText, options };
+  // ── 3. Extract text from each answer button ───────────────────────────────────
+  const options = [];
+
+  for (const btn of answerButtons) {
+    let text = '';
+
+    // Method 1: The answer text is in <div class="px-3 py-3 ..."> — second div child
+    //           inside <div class="flex items-center">
+    //           We look for the div that has px-3 AND py-3 in its class list.
+    const answerDiv =
+      btn.querySelector('div[class*="px-3"][class*="py-3"]') ??
+      btn.querySelector('div[class*="text-foreground"]:not([class*="muted"])');
+
+    if (answerDiv) {
+      text = answerDiv.textContent?.trim() ?? '';
+    }
+
+    // Method 2: For True/False — the button has <p class="...font-semibold...">True</p>
+    if (!text) {
+      const pTag = btn.querySelector('p[class*="font-semibold"]');
+      if (pTag) text = pTag.textContent?.trim() ?? '';
+    }
+
+    // Method 3: Strip the "A:" / "B:" label prefix from the full button innerText.
+    //           innerText for a typical answer button:  "A:\nAnswer text here"
+    if (!text) {
+      const raw = btn.innerText?.trim() ?? '';
+      // Remove leading option label line (e.g. "A:\n" or "A: ")
+      const stripped = raw.replace(/^[A-Z]:\s*/m, '').trim();
+      // Take only the first paragraph of text (ignore any nested noise)
+      text = stripped.split('\n').map(l => l.trim()).filter(Boolean).join(' ');
+    }
+
+    if (text && text.length > 1) {
+      options.push(text);
+    }
+  }
+
+  debug.push(`options extracted: ${options.length}`);
+
+  return {
+    question: questionText,
+    options,
+    debug: debug.join(' | '),
+  };
 }
 
 // ─── Injected into the quiz tab: click the answer button + show toast ─────────
 function clickAnswerOnPage(correctIndex, correctAnswer, optionLetter) {
-  // Find all answer buttons the same way
-  let cardContent = null;
+  // Re-run the same button discovery logic to find the correct button
+  let answerButtons = [];
 
   const questionParas = Array.from(
-    document.querySelectorAll('p[class*="font-medium"]')
-  ).filter(p => {
-    const t = p.textContent?.trim() ?? '';
-    return t.length > 10 && t !== t.toUpperCase();
-  });
+    document.querySelectorAll('p[class*="font-medium"][class*="leading-snug"]')
+  ).filter(p => (p.textContent?.trim().length ?? 0) > 10);
 
-  if (questionParas.length > 0) {
-    let node = questionParas[0];
-    for (let i = 0; i < 12; i++) {
+  const questionEl = questionParas[0] ?? null;
+
+  if (questionEl) {
+    let node = questionEl;
+    for (let depth = 0; depth < 15; depth++) {
       node = node.parentElement;
-      if (!node) break;
-      if (node.querySelectorAll('button[type="button"]').length >= 1) {
-        cardContent = node;
-        break;
+      if (!node || node === document.body) break;
+      const btns = Array.from(node.querySelectorAll('button[type="button"]'));
+      if (btns.length >= 2) { answerButtons = btns; break; }
+    }
+
+    if (answerButtons.length === 0) {
+      const headerRow = questionEl.closest('[class*="gap-3"]') ?? questionEl.parentElement?.parentElement;
+      if (headerRow?.nextElementSibling) {
+        const btns = Array.from(headerRow.nextElementSibling.querySelectorAll('button[type="button"]'));
+        if (btns.length >= 1) answerButtons = btns;
       }
     }
   }
 
-  if (!cardContent) {
-    showQuizToast(`⚠️ Couldn't find answer buttons. AI says: ${optionLetter}. ${correctAnswer}`, 'warn');
-    return;
+  if (answerButtons.length === 0) {
+    // Fallback
+    const NAV = new Set(['next', 'previous', 'prev', 'submit', 'back', 'finish', 'save', 'cancel', 'skip', 'continue']);
+    answerButtons = Array.from(document.querySelectorAll('button[type="button"]')).filter(btn => {
+      const t = (btn.textContent ?? '').trim().toLowerCase();
+      return t.length > 1 && !NAV.has(t) && t.length < 300;
+    });
   }
 
-  const btns = Array.from(cardContent.querySelectorAll('button[type="button"]'));
-  const target = btns[correctIndex];
+  const target = answerButtons[correctIndex];
+
+  // Inject animation styles once
+  if (!document.getElementById('quiz-ai-styles')) {
+    const style = document.createElement('style');
+    style.id = 'quiz-ai-styles';
+    style.textContent = `
+      @keyframes quizAiSlideIn {
+        from { opacity: 0; transform: translateY(16px) scale(.95); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+      }
+      @keyframes quizAiPulse {
+        0%,100% { box-shadow: 0 0 0 0 rgba(99,102,241,.5); }
+        50%      { box-shadow: 0 0 0 8px rgba(99,102,241,0); }
+      }
+    `;
+    document.head.appendChild(style);
+  }
 
   if (target) {
-    // Scroll it into view, then click
     target.scrollIntoView({ behavior: 'smooth', block: 'center' });
     setTimeout(() => {
       target.click();
-      showQuizToast(`✅ AI selected: ${optionLetter}. ${correctAnswer}`, 'success');
-    }, 300);
+      // Briefly highlight the clicked button
+      const prev = target.style.cssText;
+      target.style.outline = '3px solid #6366f1';
+      target.style.animation = 'quizAiPulse 0.6s ease';
+      setTimeout(() => { target.style.outline = prev; target.style.animation = ''; }, 1800);
+      showToast(`✅ AI selected: ${optionLetter}. ${correctAnswer}`, 'success');
+    }, 350);
   } else {
-    showQuizToast(`⚠️ AI answer: ${optionLetter}. ${correctAnswer} (button not found, click manually)`, 'warn');
+    showToast(`⚠️ AI answer: ${optionLetter}. ${correctAnswer} — button not found, click manually`, 'warn');
   }
 
-  // ── Floating toast on the page ──────────────────────────────────────────────
-  function showQuizToast(message, type) {
+  function showToast(message, type) {
     const existing = document.getElementById('quiz-ai-toast');
     if (existing) existing.remove();
 
@@ -192,7 +345,7 @@ function clickAnswerOnPage(correctIndex, correctAnswer, optionLetter) {
       bottom: 24px;
       right: 24px;
       z-index: 2147483647;
-      max-width: 360px;
+      max-width: 380px;
       padding: 14px 18px;
       border-radius: 12px;
       font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
@@ -206,42 +359,25 @@ function clickAnswerOnPage(correctIndex, correctAnswer, optionLetter) {
       cursor: pointer;
       ${type === 'success'
         ? 'background: linear-gradient(135deg, rgba(22,163,74,.95), rgba(5,150,105,.95)); border: 1px solid rgba(34,197,94,.4);'
-        : 'background: linear-gradient(135deg, rgba(217,119,6,.95), rgba(180,83,9,.95)); border: 1px solid rgba(251,191,36,.4);'
-      }
+        : 'background: linear-gradient(135deg, rgba(217,119,6,.95), rgba(180,83,9,.95)); border: 1px solid rgba(251,191,36,.4);'}
     `;
-
-    // Add keyframe animation if not already present
-    if (!document.getElementById('quiz-ai-styles')) {
-      const style = document.createElement('style');
-      style.id = 'quiz-ai-styles';
-      style.textContent = `
-        @keyframes quizAiSlideIn {
-          from { opacity: 0; transform: translateY(16px) scale(.95); }
-          to   { opacity: 1; transform: translateY(0) scale(1); }
-        }
-      `;
-      document.head.appendChild(style);
-    }
-
     toast.textContent = message;
     toast.title = 'Click to dismiss';
     toast.addEventListener('click', () => toast.remove());
     document.body.appendChild(toast);
-
-    // Auto-dismiss after 6 seconds
-    setTimeout(() => toast?.remove(), 6000);
+    setTimeout(() => toast?.remove(), 7000);
   }
 }
 
 // ─── Status helpers ───────────────────────────────────────────────────────────
-function showStatus(type, html) {
+function showStatus(type, text) {
   statusArea.style.display = 'block';
   statusBox.className = `status-box ${type}`;
 
   if (type === 'loading') {
-    statusBox.innerHTML = `<div class="spinner"></div><span style="white-space:pre-wrap">${html}</span>`;
+    statusBox.innerHTML = `<div class="spinner"></div><span style="white-space:pre-wrap">${text}</span>`;
   } else {
-    statusBox.innerHTML = html;
+    statusBox.innerHTML = text;
   }
 }
 
