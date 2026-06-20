@@ -1,20 +1,204 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <title>QuizSolver Side Panel</title>
+    <title>QuizSolver AI PRO</title>
+    <meta charset="utf-8" />
     <style>
-      body, html, iframe {
-        margin: 0;
-        padding: 0;
-        width: 100%;
-        height: 100%;
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+        background: #0f0f13;
+        color: #e2e8f0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
         overflow: hidden;
-        border: none;
       }
+
+      /* ── Header ── */
+      .header {
+        padding: 16px 18px 12px;
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+        border-bottom: 1px solid rgba(99,102,241,.25);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+      }
+      .logo {
+        width: 32px; height: 32px;
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        border-radius: 8px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 16px;
+      }
+      .header-text h1 { font-size: 14px; font-weight: 700; color: #f1f5f9; letter-spacing: .3px; }
+      .header-text p  { font-size: 11px; color: #64748b; margin-top: 1px; }
+
+      /* ── Main area ── */
+      .main {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 16px;
+        overflow-y: auto;
+      }
+
+      /* ── Auto-answer card ── */
+      .auto-card {
+        background: linear-gradient(135deg, rgba(99,102,241,.12) 0%, rgba(139,92,246,.08) 100%);
+        border: 1px solid rgba(99,102,241,.3);
+        border-radius: 14px;
+        padding: 16px;
+      }
+      .auto-card h2 {
+        font-size: 13px;
+        font-weight: 700;
+        color: #a5b4fc;
+        margin-bottom: 6px;
+        display: flex; align-items: center; gap: 6px;
+      }
+      .auto-card p {
+        font-size: 12px;
+        color: #64748b;
+        line-height: 1.5;
+        margin-bottom: 14px;
+      }
+
+      /* ── Buttons ── */
+      .btn-primary {
+        width: 100%;
+        padding: 11px 16px;
+        background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        border: none;
+        border-radius: 10px;
+        color: #fff;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity .15s, transform .1s;
+        display: flex; align-items: center; justify-content: center; gap: 7px;
+      }
+      .btn-primary:hover  { opacity: .9; }
+      .btn-primary:active { transform: scale(.98); }
+      .btn-primary:disabled { opacity: .4; cursor: not-allowed; }
+
+      .btn-secondary {
+        width: 100%;
+        padding: 10px 16px;
+        background: rgba(255,255,255,.04);
+        border: 1px solid rgba(255,255,255,.1);
+        border-radius: 10px;
+        color: #94a3b8;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background .15s;
+        display: flex; align-items: center; justify-content: center; gap: 7px;
+        margin-top: 8px;
+      }
+      .btn-secondary:hover { background: rgba(255,255,255,.08); }
+
+      /* ── Status / result ── */
+      #status-area {
+        margin-top: 4px;
+        display: none;
+      }
+      .status-box {
+        border-radius: 10px;
+        padding: 12px 14px;
+        font-size: 12px;
+        line-height: 1.55;
+      }
+      .status-box.loading {
+        background: rgba(99,102,241,.1);
+        border: 1px solid rgba(99,102,241,.25);
+        color: #a5b4fc;
+        display: flex; align-items: center; gap: 8px;
+      }
+      .status-box.success {
+        background: rgba(34,197,94,.08);
+        border: 1px solid rgba(34,197,94,.25);
+        color: #86efac;
+      }
+      .status-box.error {
+        background: rgba(239,68,68,.08);
+        border: 1px solid rgba(239,68,68,.25);
+        color: #fca5a5;
+      }
+      .answer-label { font-size: 11px; color: #64748b; margin-bottom: 3px; }
+      .answer-text  { font-size: 13px; font-weight: 600; color: #f1f5f9; }
+      .answer-index { display: inline-block; background: rgba(99,102,241,.25); color: #a5b4fc; border-radius: 4px; padding: 1px 7px; font-size: 11px; font-weight: 700; margin-right: 6px; }
+
+      /* ── Spinner ── */
+      .spinner {
+        width: 14px; height: 14px;
+        border: 2px solid rgba(165,180,252,.3);
+        border-top-color: #a5b4fc;
+        border-radius: 50%;
+        animation: spin .7s linear infinite;
+        flex-shrink: 0;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      /* ── Divider ── */
+      .divider {
+        height: 1px;
+        background: rgba(255,255,255,.06);
+        border-radius: 1px;
+      }
+
+      /* ── Full-app link ── */
+      .open-app-row {
+        display: flex; align-items: center; justify-content: center; gap: 6px;
+        padding: 10px;
+        color: #475569;
+        font-size: 11px;
+      }
+      .open-app-row a {
+        color: #6366f1;
+        text-decoration: none;
+        font-weight: 500;
+      }
+      .open-app-row a:hover { text-decoration: underline; }
     </style>
   </head>
   <body>
-    <iframe id="solver-frame" src="https://quiz-ai-kappa.vercel.app/?mode=extension"></iframe>
+    <div class="header">
+      <div class="logo">🧠</div>
+      <div class="header-text">
+        <h1>QuizSolver AI PRO</h1>
+        <p>Powered by Gemini</p>
+      </div>
+    </div>
+
+    <div class="main">
+      <div class="auto-card">
+        <h2>⚡ Auto-Answer on Page</h2>
+        <p>AI reads the current question and clicks the correct answer directly on the page for you.</p>
+
+        <button class="btn-primary" id="btn-auto-answer">
+          <span>🎯</span> Answer This Question
+        </button>
+
+        <button class="btn-secondary" id="btn-full-app">
+          <span>📋</span> Open Full Analyzer
+        </button>
+      </div>
+
+      <div id="status-area">
+        <div class="status-box" id="status-box"></div>
+      </div>
+
+      <div class="divider"></div>
+    </div>
+
+    <div class="open-app-row">
+      <a href="https://quiz-ai-kappa.vercel.app" target="_blank">Open full app ↗</a>
+    </div>
+
     <script src="sidepanel.js"></script>
   </body>
 </html>
