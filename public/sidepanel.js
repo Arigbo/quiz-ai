@@ -405,8 +405,8 @@ function sleep(ms) {
 }
 
 // ─── Helper: call AI with quota-exceeded retry ────────────────────────────────
-async function callAIWithRetry(question, options, questionNumber, maxRetries = 5) {
-  const RETRY_WAIT_MS = 2 * 60 * 1000; // 2 minutes
+async function callAIWithRetry(question, options, questionNumber, maxRetries = 8) {
+  const FALLBACK_WAIT_SEC = 120; // 2 minutes if no retry hint in error
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     const res = await fetch(`${API_BASE}/api/auto-answer`, {
@@ -415,34 +415,39 @@ async function callAIWithRetry(question, options, questionNumber, maxRetries = 5
       body: JSON.stringify({ question, options }),
     });
 
-    if (res.ok) {
-      return res.json();
-    }
+    if (res.ok) return res.json();
 
     const errBody = await res.json().catch(() => ({}));
-    const errMsg  = (errBody.error ?? '').toLowerCase();
+    const errMsg  = errBody.error ?? '';
+    const errLow  = errMsg.toLowerCase();
+
     const isQuota = res.status === 429 ||
-                    errMsg.includes('quota') ||
-                    errMsg.includes('rate limit') ||
-                    errMsg.includes('resource_exhausted') ||
-                    errMsg.includes('too many requests');
+                    errLow.includes('quota') ||
+                    errLow.includes('rate limit') ||
+                    errLow.includes('resource_exhausted') ||
+                    errLow.includes('too many requests');
 
     if (!isQuota || attempt >= maxRetries) {
-      throw new Error(errBody.error || `API error ${res.status}`);
+      throw new Error(errMsg || `API error ${res.status}`);
     }
 
-    // ── Quota hit — countdown then retry ─────────────────────────────────
-    addLog(`Q${questionNumber}: ⏳ Quota exceeded, waiting 2 min… (attempt ${attempt}/${maxRetries})`, 'error');
+    // ── Parse "Please retry in X.XXXs" from the error message ────────────
+    // e.g. "Please retry in 19.354892621s"
+    const retryMatch = errMsg.match(/retry in\s+([\d.]+)s/i);
+    const waitSec    = retryMatch
+      ? Math.ceil(parseFloat(retryMatch[1])) + 5   // suggested wait + 5s buffer
+      : FALLBACK_WAIT_SEC;
 
-    const totalSec = RETRY_WAIT_MS / 1000;
-    let remaining  = totalSec;
+    addLog(`Q${questionNumber}: ⏳ Quota — wait ${waitSec}s (attempt ${attempt}/${maxRetries})`, 'error');
 
+    // ── Live countdown ────────────────────────────────────────────────────
+    let remaining = waitSec;
     while (remaining > 0) {
       if (stopRequested) throw new Error('Stopped by user');
 
       const mins = Math.floor(remaining / 60);
       const secs = String(remaining % 60).padStart(2, '0');
-      const pct  = Math.round(((totalSec - remaining) / totalSec) * 100);
+      const pct  = Math.round(((waitSec - remaining) / waitSec) * 100);
 
       showStatus('loading',
         `⏳ Quota exceeded — retrying in ${mins}:${secs}\n` +
@@ -456,11 +461,12 @@ async function callAIWithRetry(question, options, questionNumber, maxRetries = 5
     }
 
     showStatus('loading', `↩️ Retrying Q${questionNumber}…`);
-    await sleep(500);
+    await sleep(400);
   }
 
   throw new Error('Max retries exceeded after quota errors');
 }
+
 
 // ─── UI helpers ───────────────────────────────────────────────────────────────
 function showStatus(type, html) {
