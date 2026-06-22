@@ -7,7 +7,8 @@
  * - AutoAnswerQuizQuestionOutput - The return type for the autoAnswerQuizQuestion function.
  */
 
-import {ai} from '@/ai/genkit';
+import {ai, FALLBACK_MODELS} from '@/ai/genkit';
+import {withRetry} from '@/ai/retry';
 import {z} from 'genkit';
 
 const AutoAnswerQuizQuestionInputSchema = z.object({
@@ -59,8 +60,27 @@ const autoAnswerQuizQuestionFlow = ai.defineFlow(
     inputSchema: AutoAnswerQuizQuestionInputSchema,
     outputSchema: AutoAnswerQuizQuestionOutputSchema,
   },
-  async input => {
-    const {output} = await autoAnswerQuizQuestionPrompt(input);
-    return output!;
+  async (input) => {
+    // Try each model in order, with retry+backoff per model.
+    // This handles both transient 503s on the primary model AND
+    // persistent overload by falling back to less-loaded models.
+    let lastError: unknown;
+
+    for (const model of FALLBACK_MODELS) {
+      try {
+        const result = await withRetry(
+          () => autoAnswerQuizQuestionPrompt(input, { model }),
+          // 3 attempts per model, 1.5s base delay
+          3,
+          1500,
+        );
+        return result.output!;
+      } catch (error) {
+        console.warn(`[autoAnswer] Model ${model} failed, trying next…`, error instanceof Error ? error.message : error);
+        lastError = error;
+      }
+    }
+
+    throw lastError;
   }
 );

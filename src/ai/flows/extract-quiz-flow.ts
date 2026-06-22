@@ -5,7 +5,8 @@
  * - extractQuiz - Fetches website content and parses it into structured quiz questions.
  */
 
-import { ai } from '@/ai/genkit';
+import { ai, FALLBACK_MODELS } from '@/ai/genkit';
+import { withRetry } from '@/ai/retry';
 import { z } from 'genkit';
 
 const QuizQuestionSchema = z.object({
@@ -85,13 +86,29 @@ const extractQuizFlow = ai.defineFlow(
           .replace(/<script\b[^>]*>([\s\S]*?)<\/script>/gm, '')
           .replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gm, '')
           .replace(/<svg\b[^>]*>([\s\S]*?)<\/svg>/gm, '')
-          .substring(0, 20000); 
-      } catch (e) {
+          .substring(0, 20000);
+      } catch {
         throw new Error("Failed to fetch the URL. The website might be blocking automated access.");
       }
     }
 
-    const { output } = await extractPrompt({ ...input, content: contentToParse });
-    return output!;
+    // Try each model in order, with retry+backoff per model.
+    let lastError: unknown;
+
+    for (const model of FALLBACK_MODELS) {
+      try {
+        const result = await withRetry(
+          () => extractPrompt({ ...input, content: contentToParse }, { model }),
+          3,
+          1500,
+        );
+        return result.output!;
+      } catch (error) {
+        console.warn(`[extractQuiz] Model ${model} failed, trying next…`, error instanceof Error ? error.message : error);
+        lastError = error;
+      }
+    }
+
+    throw lastError;
   }
 );

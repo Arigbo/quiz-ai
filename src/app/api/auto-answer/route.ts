@@ -6,10 +6,15 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const result = await autoAnswerQuizQuestion(body);
     return NextResponse.json(result);
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const msg = error instanceof Error ? error.message : 'Failed to answer question.';
+    const isUnavailable = msg.toLowerCase().includes('503') ||
+      msg.toLowerCase().includes('unavailable') ||
+      msg.toLowerCase().includes('high demand');
+
     return NextResponse.json(
-      { error: error?.message || 'Failed to answer question.' },
-      { status: 500 }
+      { error: msg },
+      { status: isUnavailable ? 503 : 500 },
     );
   }
 }
