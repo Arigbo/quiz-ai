@@ -193,8 +193,8 @@
 
     <!-- Tabs -->
     <div class="tabs">
-      <button class="tab active" id="tab-quiz"    onclick="switchTab('quiz')">📝 Quiz</button>
-      <button class="tab"        id="tab-project" onclick="switchTab('project')">📁 Project</button>
+      <button class="tab active" id="tab-quiz"    data-tab="quiz">📝 Quiz</button>
+      <button class="tab"        id="tab-project" data-tab="project">📁 Project</button>
     </div>
 
     <!-- ── Quiz Panel ── -->
@@ -256,14 +256,6 @@
       <a href="https://quiz-ai-kappa.vercel.app" target="_blank">Open full app ↗</a>
     </div>
 
-    <script>
-      function switchTab(tab) {
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-        document.getElementById('tab-' + tab).classList.add('active');
-        document.getElementById('panel-' + tab).classList.add('active');
-      }
-    </script>
     <script src="sidepanel.js"></script>
   </body>
 </html>
